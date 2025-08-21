@@ -96,15 +96,29 @@ def linha_valida(linha: str) -> bool:
     
     linha = linha.strip()
     
-    # Divide a linha em partes, mas cuidado com URLs que podem ter múltiplos ':'
-    # Procura pelo padrão: URL (que começa com http/https) : user : pass
+    # Para URLs que começam com http:// ou https://
     if linha.startswith('http://') or linha.startswith('https://'):
-        # Encontra os dois pontos que separam URL:user:pass
-        partes = linha.split(':', 2)  # Divide em no máximo 3 partes
-        if len(partes) >= 3:
-            url, user, password = partes[0], partes[1], partes[2]
-            # Verifica se todas as partes têm conteúdo
-            return bool(url.strip() and user.strip() and password.strip())
+        # Encontra a primeira ocorrência de ': ' (dois pontos seguido de espaço) após a URL
+        # Isso evita confundir com os ':' do protocolo e da porta
+        primeiro_separador = linha.find(': ')
+        if primeiro_separador != -1:
+            url = linha[:primeiro_separador].strip()
+            resto = linha[primeiro_separador + 2:].strip()  # +2 para pular ': '
+            
+            # Agora procura o segundo separador no resto
+            segundo_separador = resto.find(': ')
+            if segundo_separador != -1:
+                user = resto[:segundo_separador].strip()
+                password = resto[segundo_separador + 2:].strip()  # +2 para pular ': '
+                
+                # Verifica se todas as partes têm conteúdo
+                return bool(url and user and password)
+            else:
+                # Tenta dividir por ':' simples se não encontrou ': '
+                partes_resto = resto.split(':')
+                if len(partes_resto) == 2:
+                    user, password = partes_resto
+                    return bool(url and user.strip() and password.strip())
     
     # Fallback: se não começa com http, tenta dividir normalmente em 3 partes
     partes = linha.split(":")
@@ -122,10 +136,24 @@ def upload_file():
             try:
                 # lê o conteúdo do arquivo
                 content = file.read().decode("utf-8", errors="ignore").splitlines()
+                app.logger.info(f"Arquivo lido com {len(content)} linhas")
+                
                 # filtra linhas válidas
-                filtradas = [linha.strip() for linha in content if linha_valida(linha.strip())]
+                filtradas = []
+                for linha in content:
+                    linha_limpa = linha.strip()
+                    if linha_limpa:  # ignora linhas vazias
+                        if linha_valida(linha_limpa):
+                            filtradas.append(linha_limpa)
+                            app.logger.info(f"Linha válida: {linha_limpa}")
+                        else:
+                            app.logger.info(f"Linha inválida: {linha_limpa}")
+                
+                app.logger.info(f"Total de linhas válidas: {len(filtradas)}")
+                
                 # adiciona ao acumulador
                 all_lines.extend(filtradas)
+                app.logger.info(f"Total acumulado: {len(all_lines)}")
                 
                 # Mensagem de sucesso com Bootstrap
                 success_html = f"""
