@@ -299,7 +299,7 @@ html_form = """
                                 </small>
                             </div>
                             <div class="d-grid gap-2 d-md-flex justify-content-md-center">
-                                <a href="/download" class="btn btn-success btn-lg" onclick="showDownloadLoading()">
+                                <a href="/download" class="btn btn-success btn-lg">
                                     <i class="fas fa-download me-2"></i>
                                     💾 Download Completo
                                 </a>
@@ -321,11 +321,7 @@ html_form = """
             document.getElementById('loadingOverlay').style.display = 'flex';
         }
         
-        function showDownloadLoading() {
-            document.getElementById('loadingOverlay').style.display = 'flex';
-            document.querySelector('.progress-text').textContent = '📥 Preparando download...';
-            document.querySelector('.progress-detail').textContent = 'Compilando todas as linhas processadas';
-        }
+        
         
         // Atualiza labels dos arquivos quando selecionados
         document.querySelectorAll('input[type="file"]').forEach(input => {
@@ -595,7 +591,7 @@ def upload_file():
                                             <i class="fas fa-upload me-2"></i>
                                             📤 Processar Mais
                                         </a>
-                                        <a href="/download" class="btn btn-gradient btn-lg" onclick="showDownloadLoading()">
+                                        <a href="/download" class="btn btn-gradient btn-lg">
                                             <i class="fas fa-download me-2"></i>
                                             💾 Download Completo
                                         </a>
@@ -612,11 +608,7 @@ def upload_file():
                     </div>
                 </div>
                 
-                <script>
-                    function showDownloadLoading() {{
-                        document.getElementById('loadingOverlay').style.display = 'flex';
-                    }}
-                </script>
+                
             </body>
             </html>
             """
