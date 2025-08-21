@@ -4,8 +4,8 @@ import logging
 import sqlite3
 import tempfile
 
-# Configure logging for debugging
-logging.basicConfig(level=logging.DEBUG)
+# Configure logging reduzido
+logging.basicConfig(level=logging.WARNING)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret-key-change-in-production")
@@ -430,8 +430,8 @@ def upload_file():
                                     if len(filtradas) % 50000 == 0:
                                         import gc
                                         gc.collect()
-                                    # Log apenas a cada 1000 linhas válidas para evitar spam
-                                    if len(filtradas) % 1000 == 0:
+                                    # Log apenas a cada 100k linhas válidas para reduzir spam
+                                    if len(filtradas) % 100000 == 0:
                                         app.logger.info(f"Processadas {len(filtradas)} linhas válidas...")
                         
                         app.logger.info(f"Arquivo {file.filename}: {len(filtradas)} válidas de {linhas_processadas} processadas")
@@ -728,7 +728,8 @@ def download():
                         f.write("\n".join(chunk))
                         if i + chunk_size < len(linhas_finais):
                             f.write("\n")
-                        if (i // chunk_size) % 10 == 0:  # Log a cada 100k linhas
+                        # Log apenas quando 25% do arquivo for escrito
+                        if (i // chunk_size) % 250 == 0:  # Log bem menos frequente
                             app.logger.info(f"Escrito {i + len(chunk):,} linhas...")
                 else:
                     f.write("\n".join(linhas_finais))
