@@ -29,93 +29,260 @@ html_form = """
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Uploader de TXT - Processador de Linhas</title>
+    <title>🚀 Processador TXT Pro</title>
     <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            min-height: 100vh;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        .main-card {
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+        }
+        .main-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+        }
+        .card-header {
+            background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+            border-radius: 20px 20px 0 0 !important;
+            border: none;
+        }
+        .btn-gradient {
+            background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            transition: all 0.3s ease;
+        }
+        .btn-gradient:hover {
+            transform: scale(1.05);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+        }
+        .form-control {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 12px;
+            transition: all 0.3s ease;
+        }
+        .form-control:focus {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: #667eea;
+            box-shadow: 0 0 20px rgba(102, 126, 234, 0.3);
+        }
+        .stats-badge {
+            background: linear-gradient(45deg, #11998e 0%, #38ef7d 100%);
+            border-radius: 15px;
+            padding: 15px 25px;
+            font-weight: 600;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            width: 100%;
+        }
+        .file-input-wrapper input[type=file] {
+            position: absolute;
+            left: -9999px;
+        }
+        .file-input-label {
+            padding: 12px 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px dashed rgba(255, 255, 255, 0.3);
+            border-radius: 12px;
+            cursor: pointer;
+            display: block;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+        .file-input-label:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: #667eea;
+        }
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(5px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+        .loading-content {
+            text-align: center;
+            color: white;
+        }
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .progress-text {
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+        .progress-detail {
+            font-size: 14px;
+            opacity: 0.8;
+        }
+    </style>
 </head>
 <body>
-    <div class="container mt-5">
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <div class="progress-text">🔄 Preparando seu arquivo final...</div>
+            <div class="progress-detail">Otimizando dados e removendo duplicatas</div>
+        </div>
+    </div>
+    
+    <div class="container py-5">
         <div class="row justify-content-center">
-            <div class="col-md-8 col-lg-6">
-                <div class="card">
-                    <div class="card-header text-center">
-                        <h2 class="card-title mb-0">
-                            <i class="fas fa-file-upload me-2"></i>
-                            Uploader de Arquivos TXT
-                        </h2>
+            <div class="col-lg-8">
+                <div class="card main-card">
+                    <div class="card-header text-center py-4">
+                        <h1 class="card-title mb-2 text-white">
+                            <i class="fas fa-rocket me-3"></i>
+                            Processador TXT Pro
+                        </h1>
+                        <p class="mb-0 text-white-50">Processamento inteligente de credenciais</p>
                     </div>
-                    <div class="card-body">
-                        <div class="alert alert-info" role="alert">
-                            <i class="fas fa-info-circle me-2"></i>
-                            <strong>Formato esperado:</strong> Linhas no padrão <code>url:user:pass</code>
-                            <br><small class="text-muted">
-                                Exemplo: <code>http://site.com.br/login:usuario123:senha456</code>
-                            </small>
+                    <div class="card-body p-4">
+                        <div class="alert alert-info border-0" style="background: rgba(102, 126, 234, 0.2); border-radius: 15px;" role="alert">
+                            <div class="d-flex align-items-center">
+                                <i class="fas fa-lightbulb me-3 fs-4" style="color: #ffd700;"></i>
+                                <div>
+                                    <strong>Formato esperado:</strong> <code class="bg-dark px-2 py-1 rounded">url:user:pass</code>
+                                    <br><small class="text-muted">
+                                        <i class="fas fa-arrow-right me-1"></i> Exemplo: <code class="bg-dark px-2 py-1 rounded">https://site.com/login:usuario:senha</code>
+                                    </small>
+                                </div>
+                            </div>
                         </div>
                         
-                        <form method="post" enctype="multipart/form-data" class="mb-4">
-                            <div class="mb-3">
-                                <label class="form-label">
-                                    <i class="fas fa-file-text me-2"></i>
+                        <form method="post" enctype="multipart/form-data" class="mb-4" onsubmit="showLoading()">
+                            <div class="mb-4">
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-cloud-upload-alt me-2" style="color: #667eea;"></i>
                                     Selecione até 4 arquivos .txt
                                 </label>
-                                <input type="file" 
-                                       class="form-control mb-2" 
-                                       name="file1" 
-                                       accept=".txt">
-                                <input type="file" 
-                                       class="form-control mb-2" 
-                                       name="file2" 
-                                       accept=".txt">
-                                <input type="file" 
-                                       class="form-control mb-2" 
-                                       name="file3" 
-                                       accept=".txt">
-                                <input type="file" 
-                                       class="form-control mb-2" 
-                                       name="file4" 
-                                       accept=".txt">
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <div class="file-input-wrapper">
+                                            <input type="file" name="file1" accept=".txt" id="file1">
+                                            <label for="file1" class="file-input-label">
+                                                <i class="fas fa-file-plus mb-2 d-block"></i>
+                                                Arquivo 1
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="file-input-wrapper">
+                                            <input type="file" name="file2" accept=".txt" id="file2">
+                                            <label for="file2" class="file-input-label">
+                                                <i class="fas fa-file-plus mb-2 d-block"></i>
+                                                Arquivo 2
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="file-input-wrapper">
+                                            <input type="file" name="file3" accept=".txt" id="file3">
+                                            <label for="file3" class="file-input-label">
+                                                <i class="fas fa-file-plus mb-2 d-block"></i>
+                                                Arquivo 3
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="file-input-wrapper">
+                                            <input type="file" name="file4" accept=".txt" id="file4">
+                                            <label for="file4" class="file-input-label">
+                                                <i class="fas fa-file-plus mb-2 d-block"></i>
+                                                Arquivo 4
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                             
-                            <div class="mb-3">
-                                <label for="filename" class="form-label">
-                                    <i class="fas fa-save me-2"></i>
+                            <div class="mb-4">
+                                <label for="filename" class="form-label fw-bold">
+                                    <i class="fas fa-tag me-2" style="color: #667eea;"></i>
                                     Nome do arquivo final
                                 </label>
-                                <input type="text" 
-                                       class="form-control" 
-                                       id="filename" 
-                                       name="filename" 
-                                       placeholder="resultado_final" 
-                                       value="resultado_final">
-                                <small class="text-muted">O arquivo será salvo como [nome].txt</small>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-transparent border-end-0" style="border-color: rgba(255,255,255,0.3);">
+                                        <i class="fas fa-file-signature"></i>
+                                    </span>
+                                    <input type="text" 
+                                           class="form-control border-start-0" 
+                                           id="filename" 
+                                           name="filename" 
+                                           placeholder="resultado_final" 
+                                           value="resultado_final"
+                                           style="border-color: rgba(255,255,255,0.3);">
+                                    <span class="input-group-text bg-transparent border-start-0" style="border-color: rgba(255,255,255,0.3);">
+                                        .txt
+                                    </span>
+                                </div>
+                                <small class="text-muted">💡 Arquivo será otimizado automaticamente (sem duplicatas)</small>
                             </div>
                             
                             <div class="d-grid">
-                                <button type="submit" class="btn btn-primary">
-                                    <i class="fas fa-upload me-2"></i>
-                                    Processar Arquivos
+                                <button type="submit" class="btn btn-gradient btn-lg py-3">
+                                    <i class="fas fa-rocket me-3"></i>
+                                    🚀 Processar Arquivos
                                 </button>
                             </div>
                         </form>
                         
-                        <div class="text-center">
-                            <div class="mb-3">
-                                <span class="badge bg-secondary fs-6">
-                                    <i class="fas fa-list me-2"></i>
-                                    """ + f"{len(all_lines):,}" + """ linhas válidas acumuladas
-                                </span>
+                        <div class="text-center mt-4">
+                            <div class="mb-4">
+                                <div class="stats-badge d-inline-block">
+                                    <i class="fas fa-chart-line me-2"></i>
+                                    <strong>""" + f"{len(all_lines):,}" + """</strong> linhas processadas
+                                </div>
                                 <br>
-                                <small class="text-muted">Limite: 3.000.000 linhas</small>
+                                <small class="text-muted mt-2 d-block">
+                                    <i class="fas fa-shield-alt me-1"></i> 
+                                    Limite máximo: 3.000.000 linhas
+                                </small>
                             </div>
-                            <a href="/download" class="btn btn-success">
-                                <i class="fas fa-download me-2"></i>
-                                Baixar Arquivo Final
-                            </a>
-                            <a href="/txt-to-db" class="btn btn-info">
-                                <i class="fas fa-database me-2"></i>
-                                Converter TXT para DB
-                            </a>
+                            <div class="d-grid gap-2 d-md-flex justify-content-md-center">
+                                <a href="/download" class="btn btn-success btn-lg" onclick="showDownloadLoading()">
+                                    <i class="fas fa-download me-2"></i>
+                                    💾 Download Final
+                                </a>
+                                <a href="/txt-to-db" class="btn btn-info btn-lg">
+                                    <i class="fas fa-database me-2"></i>
+                                    🗄️ Converter DB
+                                </a>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -124,6 +291,33 @@ html_form = """
     </div>
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function showLoading() {
+            document.getElementById('loadingOverlay').style.display = 'flex';
+        }
+        
+        function showDownloadLoading() {
+            document.getElementById('loadingOverlay').style.display = 'flex';
+            document.querySelector('.progress-text').textContent = '📥 Preparando download...';
+            document.querySelector('.progress-detail').textContent = 'Otimizando arquivo e removendo duplicatas';
+        }
+        
+        // Atualiza labels dos arquivos quando selecionados
+        document.querySelectorAll('input[type="file"]').forEach(input => {
+            input.addEventListener('change', function() {
+                const label = document.querySelector(`label[for="${this.id}"]`);
+                if (this.files[0]) {
+                    label.innerHTML = `<i class="fas fa-file-check mb-2 d-block" style="color: #28a745;"></i>${this.files[0].name}`;
+                    label.style.borderColor = '#28a745';
+                    label.style.background = 'rgba(40, 167, 69, 0.1)';
+                } else {
+                    label.innerHTML = `<i class="fas fa-file-plus mb-2 d-block"></i>Arquivo ${this.id.slice(-1)}`;
+                    label.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+                    label.style.background = 'rgba(255, 255, 255, 0.1)';
+                }
+            });
+        });
+    </script>
 </body>
 </html>
 """
@@ -276,47 +470,123 @@ def upload_file():
             nome_arquivo_final = filename
             
             # Mensagem de sucesso
-            lista_arquivos = "<br>".join([f"• {arq}" for arq in arquivos_processados])
+            lista_arquivos = "<br>".join([f"✅ {arq}" for arq in arquivos_processados])
             success_html = f"""
             <!doctype html>
             <html lang="pt-BR" data-bs-theme="dark">
             <head>
                 <meta charset="utf-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1">
-                <title>Upload Concluído</title>
+                <title>🎉 Processamento Concluído!</title>
                 <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
                 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+                <style>
+                    body {{
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        min-height: 100vh;
+                    }}
+                    .success-card {{
+                        backdrop-filter: blur(10px);
+                        background: rgba(255, 255, 255, 0.1);
+                        border: 1px solid rgba(255, 255, 255, 0.2);
+                        border-radius: 20px;
+                        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                        animation: slideUp 0.5s ease-out;
+                    }}
+                    @keyframes slideUp {{
+                        from {{ transform: translateY(30px); opacity: 0; }}
+                        to {{ transform: translateY(0); opacity: 1; }}
+                    }}
+                    .btn-gradient {{
+                        background: linear-gradient(45deg, #11998e 0%, #38ef7d 100%);
+                        border: none;
+                        transition: all 0.3s ease;
+                    }}
+                    .btn-gradient:hover {{
+                        transform: scale(1.05);
+                        box-shadow: 0 8px 25px rgba(17, 153, 142, 0.4);
+                    }}
+                    .success-icon {{
+                        animation: bounce 2s infinite;
+                    }}
+                    @keyframes bounce {{
+                        0%, 20%, 50%, 80%, 100% {{ transform: translateY(0); }}
+                        40% {{ transform: translateY(-10px); }}
+                        60% {{ transform: translateY(-5px); }}
+                    }}
+                </style>
             </head>
             <body>
-                <div class="container mt-5">
+                <div class="loading-overlay" id="loadingOverlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(5px); display: none; justify-content: center; align-items: center; z-index: 9999;">
+                    <div style="text-align: center; color: white;">
+                        <div style="width: 60px; height: 60px; border: 4px solid rgba(255,255,255,0.3); border-top: 4px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px;"></div>
+                        <div style="font-size: 18px; margin-bottom: 10px;">🔄 Preparando download otimizado...</div>
+                        <div style="font-size: 14px; opacity: 0.8;">Removendo duplicatas e organizando dados</div>
+                    </div>
+                </div>
+                <style>@keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}</style>
+                
+                <div class="container py-5">
                     <div class="row justify-content-center">
-                        <div class="col-md-8 col-lg-6">
-                            <div class="card">
-                                <div class="card-body text-center">
-                                    <div class="alert alert-success" role="alert">
-                                        <i class="fas fa-check-circle me-2 fs-4"></i>
-                                        <h4 class="alert-heading">Processamento Concluído!</h4>
-                                        <p class="mb-2"><strong>{total_filtradas} linhas válidas</strong> adicionadas dos arquivos:</p>
-                                        <div class="text-start">{lista_arquivos}</div>
-                                        <hr>
-                                        <small>Arquivo final: <strong>{filename}.txt</strong></small>
+                        <div class="col-lg-8">
+                            <div class="card success-card">
+                                <div class="card-body text-center p-5">
+                                    <div class="success-icon mb-4">
+                                        <i class="fas fa-rocket fs-1" style="color: #38ef7d;"></i>
+                                    </div>
+                                    <h2 class="text-white mb-4">🎉 Processamento Concluído!</h2>
+                                    
+                                    <div class="alert alert-success border-0" style="background: rgba(56, 239, 125, 0.2); border-radius: 15px;">
+                                        <h5 class="text-white">📁 Arquivos Processados:</h5>
+                                        <div class="mt-3 text-start">
+                                            {lista_arquivos}
+                                        </div>
                                     </div>
                                     
-                                    <div class="d-grid gap-2">
-                                        <a href="/" class="btn btn-primary">
-                                            <i class="fas fa-arrow-left me-2"></i>
-                                            Processar Mais Arquivos
+                                    <div class="row g-3 my-4">
+                                        <div class="col-md-6">
+                                            <div class="p-3 rounded-3" style="background: rgba(56, 239, 125, 0.2);">
+                                                <i class="fas fa-plus-circle mb-2" style="color: #38ef7d;"></i>
+                                                <h6 class="text-white">Adicionadas</h6>
+                                                <h4 class="text-white">{total_filtradas:,}</h4>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="p-3 rounded-3" style="background: rgba(102, 126, 234, 0.2);">
+                                                <i class="fas fa-database mb-2" style="color: #667eea;"></i>
+                                                <h6 class="text-white">Total Acumulado</h6>
+                                                <h4 class="text-white">{len(all_lines):,}</h4>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="d-grid gap-3 d-md-flex justify-content-md-center">
+                                        <a href="/" class="btn btn-light btn-lg">
+                                            <i class="fas fa-upload me-2"></i>
+                                            📤 Processar Mais
                                         </a>
-                                        <a href="/download" class="btn btn-success">
+                                        <a href="/download" class="btn btn-gradient btn-lg" onclick="showDownloadLoading()">
                                             <i class="fas fa-download me-2"></i>
-                                            Baixar {filename}.txt
+                                            💾 Download Otimizado
                                         </a>
+                                    </div>
+                                    
+                                    <div class="mt-4">
+                                        <small class="text-white-50">
+                                            💡 O arquivo será otimizado automaticamente (duplicatas removidas)
+                                        </small>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
+                
+                <script>
+                    function showDownloadLoading() {{
+                        document.getElementById('loadingOverlay').style.display = 'flex';
+                    }}
+                </script>
             </body>
             </html>
             """
@@ -403,12 +673,31 @@ def download():
             """
             return error_html
         
-        # salva o arquivo final com todas as linhas válidas
+        # Otimiza o arquivo removendo duplicatas e ordenando
         global nome_arquivo_final
-        filename = f"{nome_arquivo_final}.txt"
+        
+        # Remove duplicatas preservando a ordem original tanto quanto possível
+        linhas_unicas = list(dict.fromkeys(all_lines))  # Remove duplicatas mantendo ordem
+        linhas_finais = sorted(set(linhas_unicas))  # Ordena e garante uniqueness final
+        
+        # Calcula estatísticas de otimização
+        linhas_originais = len(all_lines)
+        linhas_finais_count = len(linhas_finais)
+        reducao = ((linhas_originais - linhas_finais_count) / linhas_originais * 100) if linhas_originais > 0 else 0
+        
+        app.logger.info(f"Otimização: {linhas_originais:,} → {linhas_finais_count:,} linhas ({reducao:.1f}% redução)")
+        
+        # Salva o arquivo final otimizado
+        filename = f"{nome_arquivo_final}_otimizado.txt"
         caminho_saida = os.path.join(UPLOAD_FOLDER, filename)
         with open(caminho_saida, "w", encoding="utf-8") as f:
-            f.write("\n".join(all_lines))
+            # Adiciona cabeçalho informativo
+            f.write(f"# Arquivo otimizado - {linhas_finais_count:,} linhas únicas\n")
+            f.write(f"# Original: {linhas_originais:,} linhas | Redução: {reducao:.1f}%\n")
+            f.write(f"# Formato: url:user:pass\n")
+            f.write("# =================================\n\n")
+            f.write("\n".join(linhas_finais))
+        
         return send_file(caminho_saida, as_attachment=True, download_name=filename)
         
     except Exception as e:
