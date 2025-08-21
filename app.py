@@ -381,7 +381,7 @@ def linha_valida(linha: str) -> bool:
             password = partes[-1].strip()  # Último
             return bool(url and user and password)
         elif linha.startswith('http://') and len(partes) >= 3:
-            # Para HTTP: reconstrói a URL e pega user:pass
+            # Para HTTP: reconstrói a URL e paga user:pass
             url = ':'.join(partes[:-2])  # Tudo exceto os 2 últimos
             user = partes[-2].strip()  # Penúltimo  
             password = partes[-1].strip()  # Último
