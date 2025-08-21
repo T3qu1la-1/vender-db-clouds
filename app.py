@@ -10,8 +10,33 @@ logging.basicConfig(level=logging.DEBUG)
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret-key-change-in-production")
 
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+# Função para limpeza de arquivos temporários antigos
+def cleanup_old_temp_files():
+    """Remove arquivos temporários antigos (mais de 1 hora)"""
+    import time
+    temp_dir = tempfile.gettempdir()
+    current_time = time.time()
+    
+    try:
+        for filename in os.listdir(temp_dir):
+            if filename.endswith(('_otimizado.txt', '.db')) and ('resultado_final' in filename or 'database' in filename):
+                filepath = os.path.join(temp_dir, filename)
+                if os.path.isfile(filepath):
+                    file_age = current_time - os.path.getmtime(filepath)
+                    if file_age > 3600:  # 1 hora
+                        try:
+                            os.remove(filepath)
+                            app.logger.info(f"Arquivo temporário antigo removido: {filename}")
+                        except Exception as e:
+                            app.logger.error(f"Erro ao remover arquivo antigo {filename}: {e}")
+    except Exception as e:
+        app.logger.error(f"Erro na limpeza de arquivos temporários: {e}")
+
+# Executa limpeza ao iniciar a aplicação
+cleanup_old_temp_files()
+
+# Pasta de uploads não é mais criada - tudo é processado em memória
+# UPLOAD_FOLDER removido - arquivos são temporários
 
 # Lista que acumula as linhas válidas
 all_lines = []
@@ -699,9 +724,9 @@ def download():
         
         app.logger.info(f"Otimização: {linhas_originais:,} → {linhas_finais_count:,} linhas ({reducao:.1f}% redução)")
         
-        # Salva o arquivo final otimizado de forma mais eficiente
+        # Cria arquivo temporário (será deletado após download)
         filename = f"{nome_arquivo_final}_otimizado.txt"
-        caminho_saida = os.path.join(UPLOAD_FOLDER, filename)
+        caminho_saida = os.path.join(tempfile.gettempdir(), filename)
         
         app.logger.info(f"Salvando arquivo: {filename} ({linhas_finais_count:,} linhas)")
         
@@ -757,10 +782,30 @@ def download():
                     max_age=0  # Não cachear
                 )
             else:
+                # Programa limpeza do arquivo após download
+                def cleanup_file():
+                    try:
+                        if os.path.exists(caminho_saida):
+                            os.remove(caminho_saida)
+                            app.logger.info(f"Arquivo temporário removido: {filename}")
+                    except Exception as cleanup_error:
+                        app.logger.error(f"Erro ao limpar arquivo: {cleanup_error}")
+                        
+                # Agenda limpeza para após o download (usando thread)
+                import threading
+                timer = threading.Timer(30.0, cleanup_file)  # Remove após 30 segundos
+                timer.start()
+                
                 return send_file(caminho_saida, as_attachment=True, download_name=filename)
                 
         except Exception as send_error:
             app.logger.error(f"Erro ao enviar arquivo: {send_error}")
+            # Limpa arquivo em caso de erro
+            try:
+                if os.path.exists(caminho_saida):
+                    os.remove(caminho_saida)
+            except:
+                pass
             return "Erro ao enviar arquivo para download", 500
         
     except Exception as e:
@@ -782,8 +827,8 @@ def txt_to_db():
             arquivos_processados = []
             total_linhas = 0
             
-            # Cria um arquivo temporário para o banco SQLite
-            db_path = os.path.join(UPLOAD_FOLDER, f"{db_filename}.db")
+            # Cria arquivo temporário para o banco SQLite (será removido após download)
+            db_path = os.path.join(tempfile.gettempdir(), f"{db_filename}.db")
             
             # Conecta ao banco SQLite
             conn = sqlite3.connect(db_path)
@@ -1021,8 +1066,23 @@ def txt_to_db():
 def download_db(filename):
     """Rota para download do arquivo de banco de dados"""
     try:
-        db_path = os.path.join(UPLOAD_FOLDER, f"{filename}.db")
+        # Procura arquivo temporário
+        db_path = os.path.join(tempfile.gettempdir(), f"{filename}.db")
         if os.path.exists(db_path):
+            # Programa limpeza do arquivo após download
+            def cleanup_db():
+                try:
+                    if os.path.exists(db_path):
+                        os.remove(db_path)
+                        app.logger.info(f"Arquivo DB temporário removido: {filename}.db")
+                except Exception as cleanup_error:
+                    app.logger.error(f"Erro ao limpar DB: {cleanup_error}")
+            
+            # Agenda limpeza para após o download
+            import threading
+            timer = threading.Timer(60.0, cleanup_db)  # Remove após 60 segundos para DBs
+            timer.start()
+            
             return send_file(db_path, as_attachment=True, download_name=f"{filename}.db")
         else:
             return "Arquivo não encontrado", 404
