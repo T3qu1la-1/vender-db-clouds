@@ -19,8 +19,8 @@ all_lines = []
 # Nome do arquivo final (personalizado pelo usuário)
 nome_arquivo_final = "resultado_final"
 
-# Limite máximo de linhas acumuladas
-MAX_LINES = 3000000  # 3 milhões
+# Limite máximo de linhas acumuladas (reduzido para evitar problemas de memória)
+MAX_LINES = 1500000  # 1.5 milhão - limite mais seguro
 
 # HTML da interface com Bootstrap styling
 html_form = """
@@ -404,6 +404,11 @@ def upload_file():
                                         app.logger.info(f"Limite de {MAX_LINES:,} linhas atingido!")
                                         break
                                     filtradas.append(linha_limpa)
+                                    
+                                    # Força garbage collection a cada 50k linhas para economizar memória
+                                    if len(filtradas) % 50000 == 0:
+                                        import gc
+                                        gc.collect()
                                     # Log apenas a cada 1000 linhas válidas para evitar spam
                                     if len(filtradas) % 1000 == 0:
                                         app.logger.info(f"Processadas {len(filtradas)} linhas válidas...")
@@ -676,9 +681,16 @@ def download():
         # Otimiza o arquivo removendo duplicatas e ordenando
         global nome_arquivo_final
         
-        # Remove duplicatas preservando a ordem original tanto quanto possível
+        # Remove duplicatas de forma mais eficiente para grandes datasets
+        app.logger.info(f"Iniciando otimização de {len(all_lines):,} linhas...")
+        
+        # Usa set para remoção mais eficiente de duplicatas
         linhas_unicas = list(dict.fromkeys(all_lines))  # Remove duplicatas mantendo ordem
-        linhas_finais = sorted(set(linhas_unicas))  # Ordena e garante uniqueness final
+        app.logger.info(f"Duplicatas removidas: {len(all_lines):,} → {len(linhas_unicas):,} linhas")
+        
+        # Ordena de forma mais eficiente
+        linhas_finais = sorted(set(linhas_unicas))
+        app.logger.info(f"Ordenação concluída: {len(linhas_finais):,} linhas finais")
         
         # Calcula estatísticas de otimização
         linhas_originais = len(all_lines)
@@ -687,18 +699,69 @@ def download():
         
         app.logger.info(f"Otimização: {linhas_originais:,} → {linhas_finais_count:,} linhas ({reducao:.1f}% redução)")
         
-        # Salva o arquivo final otimizado
+        # Salva o arquivo final otimizado de forma mais eficiente
         filename = f"{nome_arquivo_final}_otimizado.txt"
         caminho_saida = os.path.join(UPLOAD_FOLDER, filename)
-        with open(caminho_saida, "w", encoding="utf-8") as f:
-            # Adiciona cabeçalho informativo
-            f.write(f"# Arquivo otimizado - {linhas_finais_count:,} linhas únicas\n")
-            f.write(f"# Original: {linhas_originais:,} linhas | Redução: {reducao:.1f}%\n")
-            f.write(f"# Formato: url:user:pass\n")
-            f.write("# =================================\n\n")
-            f.write("\n".join(linhas_finais))
         
-        return send_file(caminho_saida, as_attachment=True, download_name=filename)
+        app.logger.info(f"Salvando arquivo: {filename} ({linhas_finais_count:,} linhas)")
+        
+        try:
+            with open(caminho_saida, "w", encoding="utf-8", buffering=8192) as f:
+                # Adiciona cabeçalho informativo
+                f.write(f"# Arquivo otimizado - {linhas_finais_count:,} linhas únicas\n")
+                f.write(f"# Original: {linhas_originais:,} linhas | Redução: {reducao:.1f}%\n")
+                f.write(f"# Formato: url:user:pass\n")
+                f.write(f"# Processado em: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write("# =================================\n\n")
+                
+                # Escreve em chunks para arquivos grandes
+                if len(linhas_finais) > 100000:  # Para arquivos grandes
+                    app.logger.info("Escrevendo arquivo grande em chunks...")
+                    chunk_size = 10000
+                    for i in range(0, len(linhas_finais), chunk_size):
+                        chunk = linhas_finais[i:i+chunk_size]
+                        f.write("\n".join(chunk))
+                        if i + chunk_size < len(linhas_finais):
+                            f.write("\n")
+                        if (i // chunk_size) % 10 == 0:  # Log a cada 100k linhas
+                            app.logger.info(f"Escrito {i + len(chunk):,} linhas...")
+                else:
+                    f.write("\n".join(linhas_finais))
+                    
+            app.logger.info(f"Arquivo salvo com sucesso: {filename}")
+            
+        except MemoryError:
+            app.logger.error("Erro de memória ao salvar arquivo")
+            return "Arquivo muito grande para processar. Tente dividir em arquivos menores.", 413
+        except Exception as write_error:
+            app.logger.error(f"Erro ao escrever arquivo: {write_error}")
+            return "Erro ao criar arquivo para download", 500
+        
+        # Verifica se o arquivo foi criado corretamente
+        if not os.path.exists(caminho_saida):
+            app.logger.error("Arquivo não foi criado")
+            return "Erro: arquivo não foi criado", 500
+            
+        file_size = os.path.getsize(caminho_saida)
+        app.logger.info(f"Iniciando download: {filename} ({file_size / (1024*1024):.1f} MB)")
+        
+        # Para arquivos muito grandes, adiciona parâmetros específicos
+        try:
+            if file_size > 50 * 1024 * 1024:  # Arquivos maiores que 50MB
+                app.logger.info("Arquivo grande detectado, usando streaming response")
+                return send_file(
+                    caminho_saida, 
+                    as_attachment=True, 
+                    download_name=filename,
+                    conditional=True,  # Permite download parcial
+                    max_age=0  # Não cachear
+                )
+            else:
+                return send_file(caminho_saida, as_attachment=True, download_name=filename)
+                
+        except Exception as send_error:
+            app.logger.error(f"Erro ao enviar arquivo: {send_error}")
+            return "Erro ao enviar arquivo para download", 500
         
     except Exception as e:
         app.logger.error(f"Erro ao gerar download: {e}")
