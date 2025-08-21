@@ -181,7 +181,7 @@ html_form = """
         <div class="loading-content">
             <div class="spinner"></div>
             <div class="progress-text">🔄 Preparando seu arquivo final...</div>
-            <div class="progress-detail">Otimizando dados e removendo duplicatas</div>
+            <div class="progress-detail">Compilando todas as linhas processadas</div>
         </div>
     </div>
     
@@ -275,7 +275,7 @@ html_form = """
                                         .txt
                                     </span>
                                 </div>
-                                <small class="text-muted">💡 Arquivo será otimizado automaticamente (sem duplicatas)</small>
+                                <small class="text-muted">💡 Arquivo manterá TODAS as linhas válidas processadas</small>
                             </div>
                             
                             <div class="d-grid">
@@ -301,7 +301,7 @@ html_form = """
                             <div class="d-grid gap-2 d-md-flex justify-content-md-center">
                                 <a href="/download" class="btn btn-success btn-lg" onclick="showDownloadLoading()">
                                     <i class="fas fa-download me-2"></i>
-                                    💾 Download Final
+                                    💾 Download Completo
                                 </a>
                                 <a href="/txt-to-db" class="btn btn-info btn-lg">
                                     <i class="fas fa-database me-2"></i>
@@ -324,7 +324,7 @@ html_form = """
         function showDownloadLoading() {
             document.getElementById('loadingOverlay').style.display = 'flex';
             document.querySelector('.progress-text').textContent = '📥 Preparando download...';
-            document.querySelector('.progress-detail').textContent = 'Otimizando arquivo e removendo duplicatas';
+            document.querySelector('.progress-detail').textContent = 'Compilando todas as linhas processadas';
         }
         
         // Atualiza labels dos arquivos quando selecionados
@@ -550,8 +550,8 @@ def upload_file():
                 <div class="loading-overlay" id="loadingOverlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); backdrop-filter: blur(5px); display: none; justify-content: center; align-items: center; z-index: 9999;">
                     <div style="text-align: center; color: white;">
                         <div style="width: 60px; height: 60px; border: 4px solid rgba(255,255,255,0.3); border-top: 4px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 20px;"></div>
-                        <div style="font-size: 18px; margin-bottom: 10px;">🔄 Preparando download otimizado...</div>
-                        <div style="font-size: 14px; opacity: 0.8;">Removendo duplicatas e organizando dados</div>
+                        <div style="font-size: 18px; margin-bottom: 10px;">🔄 Preparando download completo...</div>
+                        <div style="font-size: 14px; opacity: 0.8;">Compilando todas as linhas processadas</div>
                     </div>
                 </div>
                 <style>@keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}</style>
@@ -597,13 +597,13 @@ def upload_file():
                                         </a>
                                         <a href="/download" class="btn btn-gradient btn-lg" onclick="showDownloadLoading()">
                                             <i class="fas fa-download me-2"></i>
-                                            💾 Download Otimizado
+                                            💾 Download Completo
                                         </a>
                                     </div>
                                     
                                     <div class="mt-4">
                                         <small class="text-white-50">
-                                            💡 O arquivo será otimizado automaticamente (duplicatas removidas)
+                                            💡 O arquivo conterá TODAS as linhas válidas processadas
                                         </small>
                                     </div>
                                 </div>
@@ -703,29 +703,17 @@ def download():
             """
             return error_html
         
-        # Otimiza o arquivo removendo duplicatas e ordenando
+        # Salva arquivo com todas as linhas processadas (sem otimização)
         global nome_arquivo_final
         
-        # Remove duplicatas de forma mais eficiente para grandes datasets
-        app.logger.info(f"Iniciando otimização de {len(all_lines):,} linhas...")
-        
-        # Usa set para remoção mais eficiente de duplicatas
-        linhas_unicas = list(dict.fromkeys(all_lines))  # Remove duplicatas mantendo ordem
-        app.logger.info(f"Duplicatas removidas: {len(all_lines):,} → {len(linhas_unicas):,} linhas")
-        
-        # Ordena de forma mais eficiente
-        linhas_finais = sorted(set(linhas_unicas))
-        app.logger.info(f"Ordenação concluída: {len(linhas_finais):,} linhas finais")
-        
-        # Calcula estatísticas de otimização
-        linhas_originais = len(all_lines)
+        # Mantém todas as linhas como foram processadas
+        linhas_finais = all_lines
         linhas_finais_count = len(linhas_finais)
-        reducao = ((linhas_originais - linhas_finais_count) / linhas_originais * 100) if linhas_originais > 0 else 0
         
-        app.logger.info(f"Otimização: {linhas_originais:,} → {linhas_finais_count:,} linhas ({reducao:.1f}% redução)")
+        app.logger.info(f"Salvando arquivo com todas as {linhas_finais_count:,} linhas processadas (sem otimização)")
         
         # Cria arquivo temporário (será deletado após download)
-        filename = f"{nome_arquivo_final}_otimizado.txt"
+        filename = f"{nome_arquivo_final}_completo.txt"
         caminho_saida = os.path.join(tempfile.gettempdir(), filename)
         
         app.logger.info(f"Salvando arquivo: {filename} ({linhas_finais_count:,} linhas)")
@@ -733,10 +721,10 @@ def download():
         try:
             with open(caminho_saida, "w", encoding="utf-8", buffering=8192) as f:
                 # Adiciona cabeçalho informativo
-                f.write(f"# Arquivo otimizado - {linhas_finais_count:,} linhas únicas\n")
-                f.write(f"# Original: {linhas_originais:,} linhas | Redução: {reducao:.1f}%\n")
+                f.write(f"# Arquivo completo - {linhas_finais_count:,} linhas processadas\n")
                 f.write(f"# Formato: url:user:pass\n")
                 f.write(f"# Processado em: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write("# TODAS as linhas válidas foram mantidas (sem remoção de duplicatas)\n")
                 f.write("# =================================\n\n")
                 
                 # Escreve em chunks para arquivos grandes
