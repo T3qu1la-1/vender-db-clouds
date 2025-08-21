@@ -19,6 +19,9 @@ all_lines = []
 # Nome do arquivo final (personalizado pelo usuário)
 nome_arquivo_final = "resultado_final"
 
+# Limite máximo de linhas acumuladas
+MAX_LINES = 3000000  # 3 milhões
+
 # HTML da interface com Bootstrap styling
 html_form = """
 <!doctype html>
@@ -100,8 +103,10 @@ html_form = """
                             <div class="mb-3">
                                 <span class="badge bg-secondary fs-6">
                                     <i class="fas fa-list me-2"></i>
-                                    """ + str(len(all_lines)) + """ linhas válidas acumuladas
+                                    """ + f"{len(all_lines):,}" + """ linhas válidas acumuladas
                                 </span>
+                                <br>
+                                <small class="text-muted">Limite: 3.000.000 linhas</small>
                             </div>
                             <a href="/download" class="btn btn-success">
                                 <i class="fas fa-download me-2"></i>
@@ -130,8 +135,21 @@ def linha_valida(linha: str) -> bool:
     
     linha = linha.strip()
     
+    # Remove aspas duplas no início e fim se existirem
+    if linha.startswith('"') and linha.endswith('"'):
+        linha = linha[1:-1]
+    
+    # Lida com formato "URL":"user":"pass" - substitui aspas entre os campos
+    if linha.count('":"') >= 2:
+        # Remove todas as aspas e substitui por separadores simples
+        linha = linha.replace('":"', ':').strip('"')
+    
+    # Lida com formato "URL:user:pass" (aspas só no início/fim)
+    if linha.startswith('"') and linha.endswith('"'):
+        linha = linha[1:-1]
+    
     # Para URLs que começam com http:// ou https://
-    if linha.startswith('http://') or linha.startswith('https://'):
+    if linha.startswith(('http://', 'https://')):
         # Encontra todos os dois pontos na linha
         partes = linha.split(':')
         
@@ -140,15 +158,15 @@ def linha_valida(linha: str) -> bool:
         if linha.startswith('https://') and len(partes) >= 4:
             # Para HTTPS: reconstrói a URL e pega user:pass
             url = ':'.join(partes[:-2])  # Tudo exceto os 2 últimos
-            user = partes[-2]  # Penúltimo
-            password = partes[-1]  # Último
-            return bool(url.strip() and user.strip() and password.strip())
+            user = partes[-2].strip()  # Penúltimo
+            password = partes[-1].strip()  # Último
+            return bool(url and user and password)
         elif linha.startswith('http://') and len(partes) >= 3:
             # Para HTTP: reconstrói a URL e pega user:pass
             url = ':'.join(partes[:-2])  # Tudo exceto os 2 últimos
-            user = partes[-2]  # Penúltimo  
-            password = partes[-1]  # Último
-            return bool(url.strip() and user.strip() and password.strip())
+            user = partes[-2].strip()  # Penúltimo  
+            password = partes[-1].strip()  # Último
+            return bool(url and user and password)
     
     # Fallback: se não começa com http, tenta dividir normalmente em 3 partes
     partes = linha.split(":")
@@ -181,21 +199,33 @@ def upload_file():
                         
                         # filtra linhas válidas
                         filtradas = []
+                        linhas_processadas = 0
                         for linha in content:
                             linha_limpa = linha.strip()
                             if linha_limpa:  # ignora linhas vazias
+                                linhas_processadas += 1
                                 if linha_valida(linha_limpa):
+                                    # Verifica se não ultrapassou o limite
+                                    if len(all_lines) + len(filtradas) >= MAX_LINES:
+                                        app.logger.info(f"Limite de {MAX_LINES:,} linhas atingido!")
+                                        break
                                     filtradas.append(linha_limpa)
-                                    app.logger.info(f"Linha válida: {linha_limpa}")
-                                else:
-                                    app.logger.info(f"Linha inválida: {linha_limpa}")
+                                    # Log apenas a cada 1000 linhas válidas para evitar spam
+                                    if len(filtradas) % 1000 == 0:
+                                        app.logger.info(f"Processadas {len(filtradas)} linhas válidas...")
                         
-                        app.logger.info(f"Arquivo {file.filename}: {len(filtradas)} linhas válidas")
+                        app.logger.info(f"Arquivo {file.filename}: {len(filtradas)} válidas de {linhas_processadas} processadas")
                         
                         # adiciona ao acumulador
+                        linhas_antes = len(all_lines)
                         all_lines.extend(filtradas)
                         total_filtradas += len(filtradas)
                         arquivos_processados.append(f"{file.filename} ({len(filtradas)} válidas)")
+                        
+                        # Para se atingiu o limite
+                        if len(all_lines) >= MAX_LINES:
+                            app.logger.info(f"Limite máximo de {MAX_LINES:,} linhas atingido! Parando processamento.")
+                            break
                         
                     except Exception as e:
                         app.logger.error(f"Erro ao processar arquivo {file.filename}: {e}")
