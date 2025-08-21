@@ -39,7 +39,10 @@ html_form = """
                     <div class="card-body">
                         <div class="alert alert-info" role="alert">
                             <i class="fas fa-info-circle me-2"></i>
-                            <strong>Formato esperado:</strong> Linhas no padrão <code>parte1:parte2:parte3</code>
+                            <strong>Formato esperado:</strong> Linhas no padrão <code>url:user:pass</code>
+                            <br><small class="text-muted">
+                                Exemplo: <code>http://site.com.br/login:usuario123:senha456</code>
+                            </small>
                         </div>
                         
                         <form method="post" enctype="multipart/form-data" class="mb-4">
@@ -87,12 +90,28 @@ html_form = """
 """
 
 def linha_valida(linha: str) -> bool:
-    """Verifica se a linha segue o padrão parte1:parte2:parte3"""
+    """Verifica se a linha segue o padrão url:user:pass"""
     if not linha or not linha.strip():
         return False
     
-    partes = linha.strip().split(":")
-    return len(partes) == 3 and all(parte.strip() for parte in partes)
+    linha = linha.strip()
+    
+    # Divide a linha em partes, mas cuidado com URLs que podem ter múltiplos ':'
+    # Procura pelo padrão: URL (que começa com http/https) : user : pass
+    if linha.startswith('http://') or linha.startswith('https://'):
+        # Encontra os dois pontos que separam URL:user:pass
+        partes = linha.split(':', 2)  # Divide em no máximo 3 partes
+        if len(partes) >= 3:
+            url, user, password = partes[0], partes[1], partes[2]
+            # Verifica se todas as partes têm conteúdo
+            return bool(url.strip() and user.strip() and password.strip())
+    
+    # Fallback: se não começa com http, tenta dividir normalmente em 3 partes
+    partes = linha.split(":")
+    if len(partes) == 3:
+        return all(parte.strip() for parte in partes)
+    
+    return False
 
 @app.route("/", methods=["GET", "POST"])
 def upload_file():
