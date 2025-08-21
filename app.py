@@ -44,8 +44,8 @@ all_lines = []
 # Nome do arquivo final (personalizado pelo usuário)
 nome_arquivo_final = "resultado_final"
 
-# Limite máximo de linhas acumuladas (reduzido para evitar problemas de memória)
-MAX_LINES = 1500000  # 1.5 milhão - limite mais seguro
+# Limite máximo de linhas acumuladas
+MAX_LINES = 5000000  # 5 milhões
 
 # HTML da interface com Bootstrap styling
 html_form = """
@@ -295,7 +295,7 @@ html_form = """
                                 <br>
                                 <small class="text-muted mt-2 d-block">
                                     <i class="fas fa-shield-alt me-1"></i> 
-                                    Limite máximo: 3.000.000 linhas
+                                    Limite máximo: 5.000.000 linhas
                                 </small>
                             </div>
                             <div class="d-grid gap-2 d-md-flex justify-content-md-center">
