@@ -365,7 +365,7 @@ html_form = """
 """
 
 def linha_valida(linha: str) -> bool:
-    """Verifica se a linha segue o padrão url:user:pass"""
+    """Verifica se a linha segue o padrão url:user:pass - versão melhorada"""
     if not linha or not linha.strip():
         return False
     
@@ -384,30 +384,67 @@ def linha_valida(linha: str) -> bool:
     if linha.startswith('"') and linha.endswith('"'):
         linha = linha[1:-1]
     
-    # Para URLs que começam com http:// ou https://
-    if linha.startswith(('http://', 'https://')):
-        # Encontra todos os dois pontos na linha
-        partes = linha.split(':')
-        
-        # URLs HTTPS terão pelo menos 4 partes: ['https', '//site.com/path', 'user', 'pass']
-        # URLs HTTP terão pelo menos 3 partes: ['http', '//site.com/path', 'user', 'pass'] 
-        if linha.startswith('https://') and len(partes) >= 4:
-            # Para HTTPS: reconstrói a URL e pega user:pass
-            url = ':'.join(partes[:-2])  # Tudo exceto os 2 últimos
-            user = partes[-2].strip()  # Penúltimo
-            password = partes[-1].strip()  # Último
-            return bool(url and user and password)
-        elif linha.startswith('http://') and len(partes) >= 3:
-            # Para HTTP: reconstrói a URL e paga user:pass
-            url = ':'.join(partes[:-2])  # Tudo exceto os 2 últimos
-            user = partes[-2].strip()  # Penúltimo  
-            password = partes[-1].strip()  # Último
-            return bool(url and user and password)
+    # Remove espaços extras e caracteres de controle
+    linha = ' '.join(linha.split())
     
-    # Fallback: se não começa com http, tenta dividir normalmente em 3 partes
-    partes = linha.split(":")
-    if len(partes) == 3:
-        return all(parte.strip() for parte in partes)
+    # Tenta diferentes separadores comuns
+    separadores = [':', '|', ';', '\t', ' ']
+    
+    for sep in separadores:
+        if sep in linha:
+            partes = [p.strip() for p in linha.split(sep) if p.strip()]
+            
+            # Verifica se tem pelo menos 3 partes não vazias
+            if len(partes) >= 3:
+                # Para URLs que começam com http:// ou https://
+                if partes[0].startswith(('http://', 'https://')):
+                    # Reconstrói a URL se foi dividida incorretamente
+                    if len(partes) >= 4 and partes[0].startswith('https://'):
+                        url = ':'.join(partes[:-2])  # Reconstrói HTTPS URL
+                        user = partes[-2].strip()
+                        password = partes[-1].strip()
+                        return bool(url and user and password and len(user) > 0 and len(password) > 0)
+                    elif len(partes) >= 3 and partes[0].startswith('http://'):
+                        url = ':'.join(partes[:-2])  # Reconstrói HTTP URL  
+                        user = partes[-2].strip()
+                        password = partes[-1].strip()
+                        return bool(url and user and password and len(user) > 0 and len(password) > 0)
+                
+                # Para URLs sem protocolo ou outros formatos
+                url, user, password = partes[0], partes[1], partes[2]
+                
+                # Valida se todas as partes têm conteúdo válido
+                if (url and user and password and 
+                    len(url.strip()) > 0 and 
+                    len(user.strip()) > 0 and 
+                    len(password.strip()) > 0):
+                    
+                    # Verifica se não são apenas caracteres especiais
+                    if (not all(c in '.:/-_' for c in url.strip()) and
+                        not all(c in '.:/-_' for c in user.strip()) and  
+                        not all(c in '.:/-_' for c in password.strip())):
+                        return True
+    
+    # Fallback original para formato padrão url:user:pass
+    if ':' in linha:
+        partes = linha.split(":")
+        if len(partes) >= 3:
+            # Para HTTPS URLs
+            if linha.startswith('https://') and len(partes) >= 4:
+                url = ':'.join(partes[:-2])
+                user = partes[-2].strip()
+                password = partes[-1].strip()
+                return bool(url and user and password and len(user) > 0 and len(password) > 0)
+            # Para HTTP URLs  
+            elif linha.startswith('http://') and len(partes) >= 3:
+                url = ':'.join(partes[:-2])
+                user = partes[-2].strip()
+                password = partes[-1].strip()
+                return bool(url and user and password and len(user) > 0 and len(password) > 0)
+            # Formato simples de 3 partes
+            elif len(partes) == 3:
+                url, user, password = partes[0].strip(), partes[1].strip(), partes[2].strip()
+                return bool(url and user and password and len(url) > 0 and len(user) > 0 and len(password) > 0)
     
     return False
 
@@ -436,6 +473,9 @@ def upload_file():
                         # filtra linhas válidas
                         filtradas = []
                         linhas_processadas = 0
+                        linhas_rejeitadas = 0
+                        amostras_rejeitadas = []
+                        
                         for linha in content:
                             linha_limpa = linha.strip()
                             if linha_limpa:  # ignora linhas vazias
@@ -452,10 +492,31 @@ def upload_file():
                                         import gc
                                         gc.collect()
                                     # Log apenas a cada 100k linhas válidas para reduzir spam
-                                    if len(filtradas) % 1000000 == 0:
+                                    if len(filtradas) % 100000 == 0:
                                         app.logger.info(f"Processadas {len(filtradas)} linhas válidas...")
+                                else:
+                                    linhas_rejeitadas += 1
+                                    # Coleta amostras de linhas rejeitadas para debug
+                                    if len(amostras_rejeitadas) < 10:
+                                        amostras_rejeitadas.append(linha_limpa[:100])  # Primeiros 100 chars
                         
-                        app.logger.info(f"Arquivo {file.filename}: {len(filtradas)} válidas de {linhas_processadas} processadas")
+                        # Log detalhado com estatísticas
+                        taxa_validacao = (len(filtradas) / linhas_processadas * 100) if linhas_processadas > 0 else 0
+                        app.logger.info(f"📁 {file.filename}:")
+                        app.logger.info(f"   📊 Total lidas: {len(content):,}")
+                        app.logger.info(f"   ✅ Válidas: {len(filtradas):,} ({taxa_validacao:.1f}%)")
+                        app.logger.info(f"   ❌ Rejeitadas: {linhas_rejeitadas:,}")
+                        
+                        # Log amostras de linhas rejeitadas para debug
+                        if amostras_rejeitadas:
+                            app.logger.info(f"   🔍 Amostras rejeitadas:")
+                            for i, amostra in enumerate(amostras_rejeitadas[:5], 1):
+                                app.logger.info(f"      {i}. {amostra}")
+                        
+                        # Se a taxa de validação estiver muito baixa, alerta
+                        if taxa_validacao < 5 and len(content) > 10000:
+                            app.logger.warning(f"⚠️ Taxa de validação baixa ({taxa_validacao:.1f}%) para {file.filename}")
+                            app.logger.warning(f"   Possível formato não suportado ou dados corrompidos")
                         
                         # adiciona ao acumulador
                         linhas_antes = len(all_lines)
