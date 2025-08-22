@@ -45,7 +45,7 @@ all_lines = []
 nome_arquivo_final = "resultado_final"
 
 # Limite máximo de linhas acumuladas
-MAX_LINES = 5000000  # 5 milhões
+MAX_LINES = 60000000  # 5 milhões
 
 # HTML da interface com Bootstrap styling
 html_form = """
@@ -54,7 +54,7 @@ html_form = """
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>🚀 Processador TXT Pro</title>
+    <title>🚀 Processador TXT </title>
     <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -431,7 +431,7 @@ def upload_file():
                                         import gc
                                         gc.collect()
                                     # Log apenas a cada 100k linhas válidas para reduzir spam
-                                    if len(filtradas) % 100000 == 0:
+                                    if len(filtradas) % 1000000 == 0:
                                         app.logger.info(f"Processadas {len(filtradas)} linhas válidas...")
                         
                         app.logger.info(f"Arquivo {file.filename}: {len(filtradas)} válidas de {linhas_processadas} processadas")
