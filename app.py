@@ -12,28 +12,49 @@ app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret-key-change-in-prod
 
 # Função para limpeza de arquivos temporários antigos
 def cleanup_old_temp_files():
-    """Remove arquivos temporários antigos (mais de 1 hora)"""
+    """Remove arquivos temporários antigos (mais de 1 hora) - versão otimizada"""
     import time
+    import glob
     temp_dir = tempfile.gettempdir()
     current_time = time.time()
     
     try:
-        for filename in os.listdir(temp_dir):
-            if filename.endswith(('_otimizado.txt', '.db')) and ('resultado_final' in filename or 'database' in filename):
-                filepath = os.path.join(temp_dir, filename)
-                if os.path.isfile(filepath):
-                    file_age = current_time - os.path.getmtime(filepath)
-                    if file_age > 3600:  # 1 hora
-                        try:
+        # Usa glob para buscar apenas arquivos específicos (mais rápido que listar tudo)
+        patterns = [
+            os.path.join(temp_dir, "*resultado_final*.txt"),
+            os.path.join(temp_dir, "*database*.db"),
+            os.path.join(temp_dir, "*_otimizado.txt")
+        ]
+        
+        files_removed = 0
+        for pattern in patterns:
+            for filepath in glob.glob(pattern):
+                try:
+                    if os.path.isfile(filepath):
+                        file_age = current_time - os.path.getmtime(filepath)
+                        if file_age > 3600:  # 1 hora
                             os.remove(filepath)
-                            app.logger.info(f"Arquivo temporário antigo removido: {filename}")
-                        except Exception as e:
-                            app.logger.error(f"Erro ao remover arquivo antigo {filename}: {e}")
+                            files_removed += 1
+                            # Limita a 10 arquivos por inicialização para evitar timeout
+                            if files_removed >= 10:
+                                app.logger.info(f"Limpeza limitada: {files_removed} arquivos removidos")
+                                return
+                except Exception as e:
+                    app.logger.error(f"Erro ao remover arquivo {filepath}: {e}")
+        
+        if files_removed > 0:
+            app.logger.info(f"Limpeza concluída: {files_removed} arquivos temporários removidos")
+            
     except Exception as e:
         app.logger.error(f"Erro na limpeza de arquivos temporários: {e}")
 
-# Executa limpeza ao iniciar a aplicação
-cleanup_old_temp_files()
+# Executa limpeza ao iniciar a aplicação (em thread separada para não bloquear)
+def init_cleanup():
+    import threading
+    cleanup_thread = threading.Thread(target=cleanup_old_temp_files, daemon=True)
+    cleanup_thread.start()
+
+init_cleanup()
 
 # Pasta de uploads não é mais criada - tudo é processado em memória
 # UPLOAD_FOLDER removido - arquivos são temporários
