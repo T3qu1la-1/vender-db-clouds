@@ -7,6 +7,7 @@ import zipfile
 import io
 import re
 import time # Import time for cleanup_old_temp_files
+import hashlib
 from collections import Counter
 
 # Configure logging reduzido
@@ -19,6 +20,77 @@ app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret-key-change-in-prod
 if 'REPLIT_DEV_DOMAIN' in os.environ:
     from werkzeug.middleware.proxy_fix import ProxyFix
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
+# Sistema de Sharding SQLite para Performance
+def get_user_ip():
+    """Obtém IP do usuário para sharding"""
+    return request.environ.get('HTTP_X_FORWARDED_FOR', request.environ.get('REMOTE_ADDR', 'localhost'))
+
+def get_shard_connection(file_id: str, ip: str, base_name: str = "database", base_path=None):
+    """Cria conexão com shard SQLite baseado em hash"""
+    if base_path is None:
+        base_path = tempfile.gettempdir()
+    
+    # 4 shards por IP para distribuir carga
+    shard_num = int(hashlib.md5(f"{ip}_{file_id}".encode()).hexdigest(), 16) % 4
+    db_path = os.path.join(base_path, f"{ip}_{base_name}_shard_{shard_num}.db")
+    
+    conn = sqlite3.connect(db_path)
+    
+    # Otimizações PRAGMA para performance
+    conn.execute("PRAGMA synchronous = OFF")
+    conn.execute("PRAGMA journal_mode = WAL") 
+    conn.execute("PRAGMA cache_size = 10000")
+    conn.execute("PRAGMA temp_store = MEMORY")
+    
+    return conn, db_path
+
+def optimize_sqlite_connection(conn):
+    """Aplica otimizações PRAGMA para uploads grandes"""
+    conn.execute("PRAGMA synchronous = OFF")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA cache_size = 10000")
+    conn.execute("PRAGMA temp_store = MEMORY")
+    conn.execute("PRAGMA mmap_size = 268435456")  # 256MB
+    return conn
+
+def batch_insert_credentials(conn, data_batch, batch_size=1000):
+    """Inserção em lote otimizada para credenciais"""
+    cursor = conn.cursor()
+    
+    # Cria tabela se não existir
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS credenciais (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        url TEXT NOT NULL,
+        usuario TEXT NOT NULL,
+        senha TEXT NOT NULL,
+        linha_completa TEXT NOT NULL,
+        dominio TEXT,
+        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    
+    # Cria índices se não existirem
+    cursor.execute('''CREATE INDEX IF NOT EXISTS idx_url ON credenciais(url)''')
+    cursor.execute('''CREATE INDEX IF NOT EXISTS idx_dominio ON credenciais(dominio)''')
+    
+    # Inserção em lote usando executemany
+    inserted = 0
+    for i in range(0, len(data_batch), batch_size):
+        batch = data_batch[i:i + batch_size]
+        cursor.executemany('''
+        INSERT INTO credenciais (url, usuario, senha, linha_completa, dominio)
+        VALUES (?, ?, ?, ?, ?)
+        ''', batch)
+        inserted += len(batch)
+        
+        # Commit periódico para evitar locks longos
+        if i % (batch_size * 10) == 0:
+            conn.commit()
+    
+    conn.commit()
+    return inserted
 
 # Sistema de processamento em memória - sem arquivos salvos
 session_data = {
@@ -1507,45 +1579,22 @@ def download_filtered(filename):
 
 @app.route("/txt-to-db")
 def txt_to_db():
-    """Converte dados processados para SQLite"""
+    """Converte dados processados para SQLite usando sistema de sharding otimizado"""
     global session_data
     
     if not session_data['all_lines']:
         return "Nenhuma linha processada ainda. <a href='/'>Voltar</a>", 404
 
     try:
-        # Cria arquivo de banco temporário
+        user_ip = get_user_ip()
         nome_arquivo = session_data['nome_arquivo_final'] or "resultado_final"
-        db_filename = f"{nome_arquivo}_database.db"
-        db_path = os.path.join(tempfile.gettempdir(), db_filename)
         
-        # Remove arquivo existente se houver
-        if os.path.exists(db_path):
-            os.remove(db_path)
-
-        # Cria banco SQLite
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        # Cria tabela de credenciais
-        cursor.execute('''
-        CREATE TABLE credenciais (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            url TEXT NOT NULL,
-            usuario TEXT NOT NULL,
-            senha TEXT NOT NULL,
-            linha_completa TEXT NOT NULL,
-            dominio TEXT,
-            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        ''')
-
-        # Cria índices para melhor performance
-        cursor.execute('CREATE INDEX idx_url ON credenciais(url)')
-        cursor.execute('CREATE INDEX idx_dominio ON credenciais(dominio)')
-
-        # Insere dados
-        dados_inseridos = 0
+        # Prepara dados para inserção em lote
+        batch_data = []
+        dados_processados = 0
+        
+        app.logger.info(f"Iniciando conversão para SQLite com {len(session_data['all_lines'])} linhas")
+        
         for linha in session_data['all_lines']:
             try:
                 # Parse da linha
@@ -1574,20 +1623,34 @@ def txt_to_db():
                     except:
                         dominio = url
 
-                    cursor.execute('''
-                    INSERT INTO credenciais (url, usuario, senha, linha_completa, dominio)
-                    VALUES (?, ?, ?, ?, ?)
-                    ''', (url, usuario, senha, linha, dominio))
-                    
-                    dados_inseridos += 1
+                    batch_data.append((url, usuario, senha, linha, dominio))
+                    dados_processados += 1
 
             except Exception as parse_error:
                 app.logger.warning(f"Erro ao processar linha: {linha[:50]}... - {parse_error}")
 
-        conn.commit()
-        conn.close()
+        # Sistema de Sharding: distribui dados pelos shards
+        total_inseridos = 0
+        shards_criados = []
+        
+        # Divide dados em chunks por shard
+        chunk_size = 25000  # 25k registros por chunk
+        for i in range(0, len(batch_data), chunk_size):
+            chunk = batch_data[i:i + chunk_size]
+            file_id = f"{nome_arquivo}_chunk_{i // chunk_size}"
+            
+            # Cria conexão com shard
+            conn, db_path = get_shard_connection(file_id, user_ip, nome_arquivo)
+            shards_criados.append(db_path)
+            
+            # Inserção em lote otimizada
+            inseridos = batch_insert_credentials(conn, chunk, batch_size=2000)
+            total_inseridos += inseridos
+            
+            conn.close()
+            app.logger.info(f"Shard {len(shards_criados)} criado: {inseridos} registros inseridos")
 
-        app.logger.info(f"Banco SQLite criado: {db_filename} com {dados_inseridos} registros")
+        app.logger.info(f"Conversão concluída: {len(shards_criados)} shards criados com {total_inseridos} registros")
 
         return render_template_string(f"""
         <!doctype html>
@@ -1619,14 +1682,14 @@ def txt_to_db():
                         <div class="card main-card">
                             <div class="card-header text-center py-4" style="background: linear-gradient(45deg, #ffecd2 0%, #fcb69f 100%);">
                                 <h1 class="card-title mb-2 text-dark">
-                                    <i class="fas fa-database me-3"></i>🗄️ Banco SQLite Criado
+                                    <i class="fas fa-database me-3"></i>🗄️ Bancos SQLite Criados (Sharding)
                                 </h1>
-                                <p class="mb-0 text-dark">Conversão concluída com sucesso</p>
+                                <p class="mb-0 text-dark">Conversão concluída com sucesso usando sistema otimizado</p>
                             </div>
                             <div class="card-body p-4 text-center">
                                 <div class="alert alert-success border-0" style="background: rgba(40, 167, 69, 0.2); border-radius: 15px;">
                                     <i class="fas fa-check-circle me-2 fs-4"></i>
-                                    <strong>{dados_inseridos:,}</strong> registros inseridos no banco de dados
+                                    <strong>{total_inseridos:,}</strong> registros inseridos no banco de dados
                                 </div>
 
                                 <div class="alert alert-info border-0" style="background: rgba(23, 162, 184, 0.2); border-radius: 15px;">
@@ -1642,7 +1705,7 @@ def txt_to_db():
                                 </div>
 
                                 <div class="d-grid gap-2 d-md-flex justify-content-md-center mt-4">
-                                    <a href="/download-db/{db_filename[:-3]}" class="btn btn-info btn-lg">
+                                    <a href="/download-shards/{nome_arquivo}" class="btn btn-info btn-lg">
                                         <i class="fas fa-download me-2"></i>
                                         💾 Baixar Banco SQLite
                                     </a>
@@ -1663,6 +1726,54 @@ def txt_to_db():
     except Exception as e:
         app.logger.error(f"Erro ao criar banco SQLite: {e}")
         return "Erro ao criar banco de dados", 500
+
+@app.route("/download-shards/<filename>")
+def download_shards(filename):
+    """Download dos shards SQLite em arquivo ZIP"""
+    try:
+        user_ip = get_user_ip()
+        temp_dir = tempfile.gettempdir()
+        
+        # Encontra todos os shards do usuário
+        import glob
+        pattern = os.path.join(temp_dir, f"{user_ip}_{filename}_shard_*.db")
+        shard_files = glob.glob(pattern)
+        
+        if not shard_files:
+            return "Nenhum shard encontrado", 404
+        
+        # Cria ZIP com todos os shards
+        zip_path = os.path.join(temp_dir, f"{filename}_shards_{user_ip}.zip")
+        with zipfile.ZipFile(zip_path, 'w') as zip_file:
+            for shard_file in shard_files:
+                shard_name = os.path.basename(shard_file)
+                zip_file.write(shard_file, shard_name)
+        
+        # Remove shards individuais após criar ZIP
+        for shard_file in shard_files:
+            try:
+                os.remove(shard_file)
+            except:
+                pass
+        
+        # Agenda limpeza do ZIP após download
+        def cleanup_zip():
+            try:
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+                    app.logger.info(f"Arquivo ZIP temporário removido: {filename}_shards.zip")
+            except Exception as cleanup_error:
+                app.logger.error(f"Erro ao limpar arquivo ZIP: {cleanup_error}")
+
+        import threading
+        timer = threading.Timer(60.0, cleanup_zip)
+        timer.start()
+        
+        return send_file(zip_path, as_attachment=True, download_name=f"{filename}_shards.zip")
+        
+    except Exception as e:
+        app.logger.error(f"Erro ao baixar shards: {e}")
+        return "Erro ao baixar banco de dados", 500
 
 @app.route("/download-db/<filename>")
 def download_db(filename):
