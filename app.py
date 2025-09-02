@@ -33,17 +33,26 @@ session_data = {
     }
 }
 
-# HTML da interface com Bootstrap styling
+# HTML da interface com sistema de menus organizados
 html_form = """
 <!doctype html>
 <html lang="pt-BR" data-bs-theme="dark">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>🚀 Processador TXT </title>
+    <title>🚀 Central de Processamento TXT Pro</title>
     <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            --success-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            --warning-gradient: linear-gradient(135deg, #ff7b7b 0%, #ff9a56 100%);
+            --info-gradient: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
+            --danger-gradient: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+        }
+        
         body {
             background: 
                 radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
@@ -78,77 +87,182 @@ html_form = """
             pointer-events: none;
             z-index: -1;
         }
-        .main-card {
-            backdrop-filter: blur(15px);
-            background: 
-                linear-gradient(145deg, rgba(20, 20, 35, 0.9) 0%, rgba(30, 30, 50, 0.8) 100%);
-            border: 2px solid;
-            border-image: linear-gradient(45deg, rgba(138, 43, 226, 0.5), rgba(30, 144, 255, 0.3), rgba(138, 43, 226, 0.5)) 1;
-            border-radius: 25px;
-            box-shadow: 
-                0 15px 35px rgba(0, 0, 0, 0.7),
-                inset 0 1px 0 rgba(255, 255, 255, 0.1),
-                0 0 30px rgba(138, 43, 226, 0.2);
-            transition: all 0.4s ease;
-            position: relative;
+        
+        .main-header {
+            background: var(--primary-gradient);
+            padding: 2rem 0;
+            text-align: center;
+            border-radius: 0 0 30px 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            margin-bottom: 3rem;
         }
-        .main-card:hover {
-            transform: translateY(-8px) scale(1.02);
-            box-shadow: 
-                0 25px 50px rgba(0, 0, 0, 0.8),
-                0 0 40px rgba(138, 43, 226, 0.4),
-                inset 0 1px 0 rgba(255, 255, 255, 0.2);
-        }
-        .card-header {
-            background: 
-                linear-gradient(135deg, rgba(75, 0, 130, 0.9) 0%, rgba(25, 25, 112, 0.9) 50%, rgba(72, 61, 139, 0.9) 100%);
-            border-radius: 25px 25px 0 0 !important;
+        
+        .nav-tabs {
             border: none;
+            justify-content: center;
+            margin-bottom: 2rem;
+        }
+        
+        .nav-tabs .nav-link {
+            border: none;
+            background: rgba(20, 20, 35, 0.8);
+            color: #e0e0e0;
+            margin: 0 0.5rem;
+            border-radius: 15px;
+            padding: 15px 25px;
+            transition: all 0.3s ease;
+            font-weight: 600;
             position: relative;
             overflow: hidden;
-            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
         }
-        .card-header::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%);
-            animation: shimmer 2s infinite;
+        
+        .nav-tabs .nav-link:hover {
+            background: rgba(102, 126, 234, 0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
         }
-        @keyframes shimmer {
-            0% { transform: translateX(-100%); }
-            100% { transform: translateX(100%); }
+        
+        .nav-tabs .nav-link.active {
+            background: var(--primary-gradient);
+            color: white;
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
         }
-        .btn-gradient {
-            background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
-            border: none;
+        
+        .system-card {
+            backdrop-filter: blur(15px);
+            background: linear-gradient(145deg, rgba(20, 20, 35, 0.9) 0%, rgba(30, 30, 50, 0.8) 100%);
+            border: 1px solid rgba(138, 43, 226, 0.3);
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            transition: all 0.3s ease;
+            margin-bottom: 2rem;
+        }
+        
+        .system-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(138, 43, 226, 0.3);
+        }
+        
+        .system-card-header {
+            background: var(--primary-gradient);
+            border-radius: 20px 20px 0 0;
+            padding: 1.5rem;
+            text-align: center;
+        }
+        
+        .dashboard-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .stat-card {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(138, 43, 226, 0.2) 100%);
+            padding: 2rem;
+            border-radius: 15px;
+            text-align: center;
+            border: 1px solid rgba(138, 43, 226, 0.3);
             transition: all 0.3s ease;
         }
-        .btn-gradient:hover {
-            transform: scale(1.05);
-            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+        
+        .stat-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 10px 25px rgba(138, 43, 226, 0.3);
         }
-        .btn-lg {
+        
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 0.5rem;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            color: #b0b0b0;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .menu-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 2rem;
+            margin: 2rem 0;
+        }
+        
+        .menu-item {
+            background: linear-gradient(135deg, rgba(20, 20, 35, 0.8) 0%, rgba(30, 30, 50, 0.8) 100%);
+            border: 1px solid rgba(138, 43, 226, 0.3);
             border-radius: 15px;
+            padding: 2rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .menu-item:before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: var(--primary-gradient);
+            opacity: 0;
+            transform: rotate(45deg);
+            transition: all 0.3s ease;
+            z-index: -1;
+        }
+        
+        .menu-item:hover:before {
+            opacity: 0.1;
+        }
+        
+        .menu-item:hover {
+            transform: translateY(-5px) scale(1.02);
+            box-shadow: 0 15px 35px rgba(138, 43, 226, 0.4);
+            border-color: rgba(138, 43, 226, 0.6);
+        }
+        
+        .menu-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            background: var(--primary-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .btn-system {
+            border: none;
+            border-radius: 12px;
+            padding: 12px 30px;
             font-weight: 600;
             text-decoration: none;
             transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            margin: 0.5rem;
         }
-        .btn-lg:hover {
-            transform: translateY(-3px);
+        
+        .btn-system:hover {
+            transform: translateY(-2px);
             box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
         }
-        .btn-warning {
-            background: linear-gradient(45deg, #ff7b7b 0%, #ff9a56 100%);
-            border: none;
-        }
-        .btn-primary {
-            background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%);
-            border: none;
-        }
+        
+        .btn-processing { background: var(--primary-gradient); }
+        .btn-download { background: var(--success-gradient); }
+        .btn-filter { background: var(--warning-gradient); }
+        .btn-convert { background: var(--info-gradient); color: #333; }
+        .btn-visualize { background: var(--secondary-gradient); }
+        .btn-settings { background: var(--danger-gradient); }
+        
         .form-control {
             background: rgba(20, 20, 35, 0.8);
             border: 1px solid rgba(138, 43, 226, 0.3);
@@ -156,50 +270,25 @@ html_form = """
             transition: all 0.3s ease;
             color: #e0e0e0;
         }
+        
         .form-control:focus {
             background: rgba(30, 30, 50, 0.9);
             border-color: #8a2be2;
-            box-shadow: 
-                0 0 20px rgba(138, 43, 226, 0.5),
-                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            box-shadow: 0 0 20px rgba(138, 43, 226, 0.5);
         }
-        .stats-badge {
-            background: linear-gradient(45deg, rgba(75, 0, 130, 0.8) 0%, rgba(138, 43, 226, 0.9) 100%);
-            border: 1px solid rgba(138, 43, 226, 0.5);
-            border-radius: 20px;
-            padding: 18px 30px;
-            font-weight: 700;
-            animation: pulseGothic 3s infinite;
-            box-shadow: 
-                0 8px 25px rgba(138, 43, 226, 0.3),
-                inset 0 1px 0 rgba(255, 255, 255, 0.2);
-            color: #fff;
-            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-        }
-        @keyframes pulseGothic {
-            0% { 
-                transform: scale(1);
-                box-shadow: 0 8px 25px rgba(138, 43, 226, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
-            }
-            50% { 
-                transform: scale(1.08);
-                box-shadow: 0 12px 35px rgba(138, 43, 226, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.3);
-            }
-            100% { 
-                transform: scale(1);
-                box-shadow: 0 8px 25px rgba(138, 43, 226, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
-            }
-        }
+        
         .file-input-wrapper {
             position: relative;
             overflow: hidden;
             display: inline-block;
             width: 100%;
         }
+        
         .file-input-wrapper input[type=file] {
             position: absolute;
             left: -9999px;
         }
+        
         .file-input-label {
             padding: 15px 20px;
             background: rgba(20, 20, 35, 0.6);
@@ -210,17 +299,15 @@ html_form = """
             text-align: center;
             transition: all 0.4s ease;
             color: #e0e0e0;
-            position: relative;
-            overflow: hidden;
         }
+        
         .file-input-label:hover {
             background: rgba(30, 30, 50, 0.8);
             border-color: #8a2be2;
-            box-shadow: 
-                0 5px 15px rgba(138, 43, 226, 0.3),
-                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            box-shadow: 0 5px 15px rgba(138, 43, 226, 0.3);
             transform: translateY(-2px);
         }
+        
         .loading-overlay {
             position: fixed;
             top: 0;
@@ -234,10 +321,12 @@ html_form = """
             align-items: center;
             z-index: 9999;
         }
+        
         .loading-content {
             text-align: center;
             color: white;
         }
+        
         .spinner {
             width: 60px;
             height: 60px;
@@ -247,17 +336,18 @@ html_form = """
             animation: spin 1s linear infinite;
             margin: 0 auto 20px;
         }
+        
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-        .progress-text {
-            font-size: 18px;
-            margin-bottom: 10px;
-        }
-        .progress-detail {
-            font-size: 14px;
-            opacity: 0.8;
+        
+        .tab-content {
+            background: rgba(20, 20, 35, 0.6);
+            border-radius: 20px;
+            padding: 2rem;
+            border: 1px solid rgba(138, 43, 226, 0.3);
+            backdrop-filter: blur(10px);
         }
     </style>
 </head>
@@ -265,24 +355,129 @@ html_form = """
     <div class="loading-overlay" id="loadingOverlay">
         <div class="loading-content">
             <div class="spinner"></div>
-            <div class="progress-text">🔄 Preparando seu arquivo final...</div>
-            <div class="progress-detail">Compilando todas as linhas processadas</div>
+            <div class="progress-text">🔄 Processando...</div>
+            <div class="progress-detail">Aguarde enquanto processamos seus dados</div>
         </div>
     </div>
 
-    <div class="container py-5">
-        <div class="row justify-content-center">
-            <div class="col-lg-8">
-                <div class="card main-card">
-                    <div class="card-header text-center py-4">
-                        <h1 class="card-title mb-2 text-white">
-                            <i class="fas fa-rocket me-3"></i>
-                            Processador TXT Pro
-                        </h1>
-                        <p class="mb-0 text-white-50">Processamento inteligente de credenciais</p>
+    <!-- Header Principal -->
+    <div class="main-header">
+        <div class="container">
+            <h1 class="text-white mb-2">
+                <i class="fas fa-rocket me-3"></i>
+                Central de Processamento TXT Pro
+            </h1>
+            <p class="text-white-50 mb-0">Sistema Completo de Processamento Inteligente de Credenciais</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Dashboard de Estatísticas -->
+        <div class="dashboard-stats">
+            <div class="stat-card">
+                <div class="stat-number">""" + f"{len(session_data['all_lines']):,}" + """</div>
+                <div class="stat-label"><i class="fas fa-chart-line me-2"></i>Linhas Processadas</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">""" + f"{session_data['stats'].get('valid_lines', 0):,}" + """</div>
+                <div class="stat-label"><i class="fas fa-check-circle me-2"></i>Linhas Válidas</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">""" + f"{session_data['stats'].get('brazilian_urls', 0):,}" + """</div>
+                <div class="stat-label"><i class="fas fa-flag me-2"></i>URLs Brasileiras</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">""" + f"{len(session_data['stats'].get('domains', {})):,}" + """</div>
+                <div class="stat-label"><i class="fas fa-globe me-2"></i>Domínios Únicos</div>
+            </div>
+        </div>
+
+        <!-- Sistema de Navegação por Abas -->
+        <ul class="nav nav-tabs" id="systemTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="dashboard-tab" data-bs-toggle="tab" data-bs-target="#dashboard" type="button">
+                    <i class="fas fa-tachometer-alt me-2"></i>Dashboard
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="processing-tab" data-bs-toggle="tab" data-bs-target="#processing" type="button">
+                    <i class="fas fa-upload me-2"></i>Processamento
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="downloads-tab" data-bs-toggle="tab" data-bs-target="#downloads" type="button">
+                    <i class="fas fa-download me-2"></i>Downloads
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="conversion-tab" data-bs-toggle="tab" data-bs-target="#conversion" type="button">
+                    <i class="fas fa-exchange-alt me-2"></i>Conversão
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="visualization-tab" data-bs-toggle="tab" data-bs-target="#visualization" type="button">
+                    <i class="fas fa-eye me-2"></i>Visualização
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="settings-tab" data-bs-toggle="tab" data-bs-target="#settings" type="button">
+                    <i class="fas fa-cog me-2"></i>Configurações
+                </button>
+            </li>
+        </ul>
+
+        <!-- Conteúdo das Abas -->
+        <div class="tab-content" id="systemTabContent">
+            
+            <!-- Dashboard -->
+            <div class="tab-pane fade show active" id="dashboard">
+                <div class="row">
+                    <div class="col-12">
+                        <h2 class="text-white mb-4"><i class="fas fa-tachometer-alt me-3"></i>Painel de Controle</h2>
+                        
+                        <div class="menu-grid">
+                            <div class="menu-item" onclick="switchTab('processing')">
+                                <div class="menu-icon"><i class="fas fa-upload"></i></div>
+                                <h4 class="text-white">Processamento</h4>
+                                <p class="text-muted">Upload e processamento de arquivos TXT, ZIP e RAR</p>
+                            </div>
+                            
+                            <div class="menu-item" onclick="switchTab('downloads')">
+                                <div class="menu-icon"><i class="fas fa-download"></i></div>
+                                <h4 class="text-white">Downloads</h4>
+                                <p class="text-muted">Download completo e filtros especializados</p>
+                            </div>
+                            
+                            <div class="menu-item" onclick="switchTab('conversion')">
+                                <div class="menu-icon"><i class="fas fa-exchange-alt"></i></div>
+                                <h4 class="text-white">Conversão</h4>
+                                <p class="text-muted">Conversão para diferentes formatos de dados</p>
+                            </div>
+                            
+                            <div class="menu-item" onclick="switchTab('visualization')">
+                                <div class="menu-icon"><i class="fas fa-eye"></i></div>
+                                <h4 class="text-white">Visualização</h4>
+                                <p class="text-muted">Preview e análise detalhada dos dados</p>
+                            </div>
+                            
+                            <div class="menu-item" onclick="switchTab('settings')">
+                                <div class="menu-icon"><i class="fas fa-cog"></i></div>
+                                <h4 class="text-white">Configurações</h4>
+                                <p class="text-muted">Limpeza de dados e configurações do sistema</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Processamento de Arquivos -->
+            <div class="tab-pane fade" id="processing">
+                <div class="system-card">
+                    <div class="system-card-header">
+                        <h3 class="text-white mb-0"><i class="fas fa-upload me-3"></i>Sistema de Processamento de Arquivos</h3>
                     </div>
                     <div class="card-body p-4">
-                        <div class="alert alert-info border-0" style="background: rgba(102, 126, 234, 0.2); border-radius: 15px;" role="alert">
+                        <div class="alert alert-info border-0 mb-4" style="background: rgba(102, 126, 234, 0.2); border-radius: 15px;">
                             <div class="d-flex align-items-center">
                                 <i class="fas fa-lightbulb me-3 fs-4" style="color: #ffd700;"></i>
                                 <div>
@@ -294,9 +489,9 @@ html_form = """
                             </div>
                         </div>
 
-                        <form method="post" enctype="multipart/form-data" class="mb-4" onsubmit="showLoading()">
+                        <form method="post" enctype="multipart/form-data" onsubmit="showLoading()">
                             <div class="mb-4">
-                                <label class="form-label fw-bold">
+                                <label class="form-label fw-bold text-white">
                                     <i class="fas fa-cloud-upload-alt me-2" style="color: #667eea;"></i>
                                     Selecione até 4 arquivos (.txt/.rar/.zip)
                                 </label>
@@ -341,7 +536,7 @@ html_form = """
                             </div>
 
                             <div class="mb-4">
-                                <label for="filename" class="form-label fw-bold">
+                                <label for="filename" class="form-label fw-bold text-white">
                                     <i class="fas fa-tag me-2" style="color: #667eea;"></i>
                                     Nome do arquivo final
                                 </label>
@@ -349,12 +544,8 @@ html_form = """
                                     <span class="input-group-text bg-transparent border-end-0" style="border-color: rgba(255,255,255,0.3);">
                                         <i class="fas fa-file-signature"></i>
                                     </span>
-                                    <input type="text" 
-                                           class="form-control border-start-0" 
-                                           id="filename" 
-                                           name="filename" 
-                                           placeholder="resultado_final" 
-                                           value="resultado_final"
+                                    <input type="text" class="form-control border-start-0" id="filename" name="filename" 
+                                           placeholder="resultado_final" value="resultado_final"
                                            style="border-color: rgba(255,255,255,0.3);">
                                     <span class="input-group-text bg-transparent border-start-0" style="border-color: rgba(255,255,255,0.3);">
                                         .txt
@@ -364,47 +555,211 @@ html_form = """
                             </div>
 
                             <div class="d-grid">
-                                <button type="submit" class="btn btn-gradient btn-lg py-3">
+                                <button type="submit" class="btn btn-system btn-processing btn-lg py-3">
                                     <i class="fas fa-rocket me-3"></i>
                                     🚀 Processar Arquivos
                                 </button>
                             </div>
                         </form>
+                    </div>
+                </div>
+            </div>
 
-                        <div class="text-center mt-4">
-                            <div class="mb-4">
-                                <div class="stats-badge d-inline-block">
-                                    <i class="fas fa-chart-line me-2"></i>
-                                    <strong>""" + f"{len(session_data['all_lines']):,}" + """</strong> linhas processadas
+            <!-- Downloads e Filtros -->
+            <div class="tab-pane fade" id="downloads">
+                <div class="system-card">
+                    <div class="system-card-header">
+                        <h3 class="text-white mb-0"><i class="fas fa-download me-3"></i>Sistema de Downloads e Filtros</h3>
+                    </div>
+                    <div class="card-body p-4">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <div class="text-center">
+                                    <a href="/download" class="btn btn-system btn-download btn-lg w-100 py-3">
+                                        <i class="fas fa-download me-2"></i>
+                                        💾 Download Completo
+                                    </a>
+                                    <small class="text-muted d-block mt-2">Baixar todas as linhas processadas</small>
                                 </div>
-                                <br>
-                                <small class="text-muted mt-2 d-block">
-                                    <i class="fas fa-infinity me-1"></i> 
-                                    Sem limite de linhas
-                                </small>
                             </div>
-                            <div class="d-grid gap-2 d-md-flex justify-content-md-center">
-                                <a href="/download" class="btn btn-success btn-lg">
-                                    <i class="fas fa-download me-2"></i>
-                                    💾 Download Completo
-                                </a>
-                                <a href="/filter-br" class="btn btn-warning btn-lg">
-                                    <i class="fas fa-flag me-2"></i>
-                                    🇧🇷 Filtrar URLs .BR
-                                </a>
-                                <a href="/txt-to-db" class="btn btn-info btn-lg">
-                                    <i class="fas fa-database me-2"></i>
-                                    🗄️ Converter DB
-                                </a>
-                                <a href="/db-preview" class="btn btn-primary btn-lg">
-                                    <i class="fas fa-search me-2"></i>
-                                    🔍 Visualizar DB
-                                </a>
+                            <div class="col-md-6">
+                                <div class="text-center">
+                                    <a href="/filter-br" class="btn btn-system btn-filter btn-lg w-100 py-3">
+                                        <i class="fas fa-flag me-2"></i>
+                                        🇧🇷 Filtrar URLs .BR
+                                    </a>
+                                    <small class="text-muted d-block mt-2">Apenas credenciais de sites brasileiros</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <hr class="my-4" style="border-color: rgba(138, 43, 226, 0.3);">
+                        
+                        <div class="alert alert-warning border-0" style="background: rgba(255, 193, 7, 0.1); border-radius: 15px;">
+                            <div class="d-flex align-items-center">
+                                <i class="fas fa-info-circle me-3 fs-4" style="color: #ffc107;"></i>
+                                <div>
+                                    <strong>Filtros Disponíveis:</strong>
+                                    <ul class="mb-0 mt-2">
+                                        <li>Download Completo: Todas as linhas válidas processadas</li>
+                                        <li>Filtro .BR: URLs com domínios brasileiros (.br, .com.br, etc)</li>
+                                        <li>Detecção Inteligente: Sites brasileiros populares sem domínio .br</li>
+                                    </ul>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
+
+            <!-- Conversão de Dados -->
+            <div class="tab-pane fade" id="conversion">
+                <div class="system-card">
+                    <div class="system-card-header">
+                        <h3 class="text-white mb-0"><i class="fas fa-exchange-alt me-3"></i>Sistema de Conversão de Dados</h3>
+                    </div>
+                    <div class="card-body p-4">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <div class="text-center">
+                                    <a href="/txt-to-db" class="btn btn-system btn-convert btn-lg w-100 py-3">
+                                        <i class="fas fa-database me-2"></i>
+                                        🗄️ Converter para DB
+                                    </a>
+                                    <small class="text-muted d-block mt-2">Converter dados para banco SQLite</small>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="text-center">
+                                    <button class="btn btn-system btn-convert btn-lg w-100 py-3" onclick="alert('Em breve: Conversão para CSV')">
+                                        <i class="fas fa-file-csv me-2"></i>
+                                        📊 Converter para CSV
+                                    </button>
+                                    <small class="text-muted d-block mt-2">Exportar dados em formato CSV</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <hr class="my-4" style="border-color: rgba(138, 43, 226, 0.3);">
+                        
+                        <div class="alert alert-info border-0" style="background: rgba(102, 126, 234, 0.1); border-radius: 15px;">
+                            <div class="d-flex align-items-center">
+                                <i class="fas fa-magic me-3 fs-4" style="color: #667eea;"></i>
+                                <div>
+                                    <strong>Formatos de Conversão:</strong>
+                                    <ul class="mb-0 mt-2">
+                                        <li><strong>SQLite DB:</strong> Banco de dados estruturado para consultas avançadas</li>
+                                        <li><strong>CSV:</strong> Planilha compatível com Excel e outros editores</li>
+                                        <li><strong>JSON:</strong> Formato para APIs e desenvolvimento web</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Visualização -->
+            <div class="tab-pane fade" id="visualization">
+                <div class="system-card">
+                    <div class="system-card-header">
+                        <h3 class="text-white mb-0"><i class="fas fa-eye me-3"></i>Sistema de Visualização e Análise</h3>
+                    </div>
+                    <div class="card-body p-4">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <div class="text-center">
+                                    <a href="/db-preview" class="btn btn-system btn-visualize btn-lg w-100 py-3">
+                                        <i class="fas fa-search me-2"></i>
+                                        🔍 Preview do Banco
+                                    </a>
+                                    <small class="text-muted d-block mt-2">Visualizar dados do banco SQLite</small>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="text-center">
+                                    <button class="btn btn-system btn-visualize btn-lg w-100 py-3" onclick="showStats()">
+                                        <i class="fas fa-chart-pie me-2"></i>
+                                        📈 Estatísticas Detalhadas
+                                    </button>
+                                    <small class="text-muted d-block mt-2">Análise completa dos dados processados</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <hr class="my-4" style="border-color: rgba(138, 43, 226, 0.3);">
+                        
+                        <div id="statsDetails" style="display: none;" class="alert alert-success border-0" style="background: rgba(40, 167, 69, 0.1); border-radius: 15px;">
+                            <h5 class="text-success"><i class="fas fa-chart-line me-2"></i>Estatísticas Detalhadas</h5>
+                            <div class="row">
+                                <div class="col-md-3">
+                                    <strong>Total de Linhas:</strong><br>
+                                    <span class="fs-4 text-info">""" + f"{len(session_data['all_lines']):,}" + """</span>
+                                </div>
+                                <div class="col-md-3">
+                                    <strong>Linhas Válidas:</strong><br>
+                                    <span class="fs-4 text-success">""" + f"{session_data['stats'].get('valid_lines', 0):,}" + """</span>
+                                </div>
+                                <div class="col-md-3">
+                                    <strong>URLs Brasileiras:</strong><br>
+                                    <span class="fs-4 text-warning">""" + f"{session_data['stats'].get('brazilian_urls', 0):,}" + """</span>
+                                </div>
+                                <div class="col-md-3">
+                                    <strong>Domínios Únicos:</strong><br>
+                                    <span class="fs-4 text-info">""" + f"{len(session_data['stats'].get('domains', {})):,}" + """</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Configurações -->
+            <div class="tab-pane fade" id="settings">
+                <div class="system-card">
+                    <div class="system-card-header">
+                        <h3 class="text-white mb-0"><i class="fas fa-cog me-3"></i>Configurações do Sistema</h3>
+                    </div>
+                    <div class="card-body p-4">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <div class="text-center">
+                                    <a href="/clear-data" class="btn btn-system btn-settings btn-lg w-100 py-3" 
+                                       onclick="return confirm('⚠️ Tem certeza que deseja limpar todos os dados processados?')">
+                                        <i class="fas fa-trash-alt me-2"></i>
+                                        🗑️ Limpar Dados
+                                    </a>
+                                    <small class="text-muted d-block mt-2">Remover todas as linhas processadas</small>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="text-center">
+                                    <button class="btn btn-system btn-settings btn-lg w-100 py-3" onclick="showSystemInfo()">
+                                        <i class="fas fa-info-circle me-2"></i>
+                                        ℹ️ Informações do Sistema
+                                    </button>
+                                    <small class="text-muted d-block mt-2">Detalhes técnicos do sistema</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <hr class="my-4" style="border-color: rgba(138, 43, 226, 0.3);">
+                        
+                        <div id="systemInfo" style="display: none;" class="alert alert-dark border-0" style="background: rgba(52, 58, 64, 0.8); border-radius: 15px;">
+                            <h5 class="text-light"><i class="fas fa-server me-2"></i>Informações do Sistema</h5>
+                            <ul class="text-muted mb-0">
+                                <li><strong>Versão:</strong> TXT Pro v2.0</li>
+                                <li><strong>Capacidade:</strong> Sem limite de linhas</li>
+                                <li><strong>Formatos Suportados:</strong> TXT, ZIP, RAR</li>
+                                <li><strong>Filtros:</strong> URLs Brasileiras</li>
+                                <li><strong>Conversões:</strong> SQLite, CSV, JSON</li>
+                                <li><strong>Status:</strong> <span class="text-success">Online ✅</span></li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
         </div>
     </div>
 
@@ -413,8 +768,30 @@ html_form = """
         function showLoading() {
             document.getElementById('loadingOverlay').style.display = 'flex';
         }
-
-
+        
+        function switchTab(tabName) {
+            const tabElement = document.querySelector('#' + tabName + '-tab');
+            const tab = new bootstrap.Tab(tabElement);
+            tab.show();
+        }
+        
+        function showStats() {
+            const statsElement = document.getElementById('statsDetails');
+            if (statsElement.style.display === 'none') {
+                statsElement.style.display = 'block';
+            } else {
+                statsElement.style.display = 'none';
+            }
+        }
+        
+        function showSystemInfo() {
+            const infoElement = document.getElementById('systemInfo');
+            if (infoElement.style.display === 'none') {
+                infoElement.style.display = 'block';
+            } else {
+                infoElement.style.display = 'none';
+            }
+        }
 
         // Atualiza labels dos arquivos quando selecionados
         document.querySelectorAll('input[type="file"]').forEach(input => {
@@ -425,9 +802,10 @@ html_form = """
                     label.style.borderColor = '#28a745';
                     label.style.background = 'rgba(40, 167, 69, 0.1)';
                 } else {
-                    label.innerHTML = `<i class="fas fa-file-plus mb-2 d-block"></i>Arquivo ${this.id.slice(-1)}`;
-                    label.style.borderColor = 'rgba(255, 255, 255, 0.3)';
-                    label.style.background = 'rgba(255, 255, 255, 0.1)';
+                    const fileNumber = this.id.slice(-1);
+                    label.innerHTML = `<i class="fas fa-file-plus mb-2 d-block"></i>Arquivo ${fileNumber} (.txt/.rar/.zip)`;
+                    label.style.borderColor = 'rgba(138, 43, 226, 0.4)';
+                    label.style.background = 'rgba(20, 20, 35, 0.6)';
                 }
             });
         });
@@ -816,6 +1194,10 @@ def upload_file():
             global nome_arquivo_final
             nome_arquivo_final = filename
 
+            # Atualiza estatísticas
+            session_data['stats']['total_lines'] = len(session_data['all_lines'])
+            session_data['stats']['valid_lines'] = len(session_data['all_lines'])
+
             # Mensagem de sucesso
             lista_arquivos = "<br>".join([f"✅ {arq}" for arq in arquivos_processados])
             success_html = f"""
@@ -908,20 +1290,14 @@ def upload_file():
                                     </div>
 
                                     <div class="d-grid gap-3 d-md-flex justify-content-md-center">
-                                        <a href="/" class="btn btn-light btn-lg">
-                                            <i class="fas fa-upload me-2"></i>
-                                            📤 Processar Mais
+                                        <a href="/" class="btn btn-gradient btn-lg">
+                                            <i class="fas fa-home me-2"></i>
+                                            Página Principal
                                         </a>
-                                        <a href="/download" class="btn btn-gradient btn-lg">
+                                        <a href="/download" class="btn btn-outline-light btn-lg" onclick="showLoading()">
                                             <i class="fas fa-download me-2"></i>
                                             💾 Download Completo
                                         </a>
-                                    </div>
-
-                                    <div class="mt-4">
-                                        <small class="text-white-50">
-                                            💡 O arquivo conterá TODAS as linhas válidas processadas
-                                        </small>
                                     </div>
                                 </div>
                             </div>
@@ -929,83 +1305,96 @@ def upload_file():
                     </div>
                 </div>
 
-
+                <script>
+                    function showLoading() {{
+                        document.getElementById('loadingOverlay').style.display = 'flex';
+                    }}
+                </script>
             </body>
             </html>
             """
             return success_html
 
         except Exception as e:
-            app.logger.error(f"Erro geral no processamento: {e}")
-            error_html = """
-            <!doctype html>
-            <html lang="pt-BR" data-bs-theme="dark">
-            <head>
-                <meta charset="utf-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1">
-                <title>Erro no Upload</title>
-                <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
-                <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-            </head>
-            <body>
-                <div class="container mt-5">
-                    <div class="row justify-content-center">
-                        <div class="col-md-8 col-lg-6">
-                            <div class="card">
-                                <div class="card-body text-center">
-                                    <div class="alert alert-danger" role="alert">
-                                        <i class="fas fa-exclamation-triangle me-2 fs-4"></i>
-                                        <h4 class="alert-heading">Erro no Processamento</h4>
-                                        <p class="mb-0">Erro interno. Tente novamente.</p>
-                                    </div>
-
-                                    <a href="/" class="btn btn-secondary">
-                                        <i class="fas fa-arrow-left me-2"></i>
-                                        Tentar Novamente
-                                    </a>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </body>
-            </html>
-            """
-            return error_html
+            app.logger.error(f"Erro no processamento: {e}")
+            return "Erro interno no servidor", 500
 
     return render_template_string(html_form)
 
 @app.route("/download")
 def download():
-    """Download direto do conteúdo processado em memória."""
+    """Download do arquivo final compilado"""
+    global session_data
+
+    if not session_data['all_lines']:
+        return "Nenhuma linha processada ainda", 404
+
+    filename = session_data['nome_arquivo_final'] or "resultado_final"
+    
+    # Cria arquivo em memória
+    file_content = "\n".join(session_data['all_lines'])
+    
+    # Cria arquivo temporário
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as tmp_file:
+        tmp_file.write(file_content)
+        tmp_path = tmp_file.name
+
+    # Agenda limpeza do arquivo após o download
+    def cleanup_file():
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+                app.logger.info(f"Arquivo temporário removido: {filename}.txt")
+        except Exception as cleanup_error:
+            app.logger.error(f"Erro ao limpar arquivo temporário: {cleanup_error}")
+
+    import threading
+    timer = threading.Timer(30.0, cleanup_file)
+    timer.start()
+
+    return send_file(tmp_path, as_attachment=True, download_name=f"{filename}.txt")
+
+@app.route("/filter-br")
+def filter_br():
+    """Filtro para URLs brasileiras"""
+    global session_data
+    
+    if not session_data['all_lines']:
+        return "Nenhuma linha processada ainda. <a href='/'>Voltar</a>", 404
+
     try:
-        if not session_data['all_lines']:
-            # Erro se não há linhas para download
-            error_html = """
+        # Aplica filtro brasileiro
+        urls_br = filtrar_urls_brasileiras(session_data['all_lines'])
+        
+        # Atualiza estatísticas
+        session_data['stats']['brazilian_urls'] = len(urls_br)
+
+        if not urls_br:
+            return render_template_string("""
             <!doctype html>
             <html lang="pt-BR" data-bs-theme="dark">
             <head>
                 <meta charset="utf-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1">
-                <title>Nenhum Arquivo</title>
+                <title>Filtro .BR</title>
                 <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
                 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
             </head>
-            <body>
-                <div class="container mt-5">
+            <body style="background: linear-gradient(135deg, #ff7b7b 0%, #ff9a56 100%); min-height: 100vh;">
+                <div class="container py-5">
                     <div class="row justify-content-center">
-                        <div class="col-md-8 col-lg-6">
-                            <div class="card">
-                                <div class="card-body text-center">
-                                    <div class="alert alert-info" role="alert">
-                                        <i class="fas fa-info-circle me-2 fs-4"></i>
-                                        <h4 class="alert-heading">Nenhum Arquivo Disponível</h4>
-                                        <p class="mb-0">Não há linhas válidas para download. Faça upload de arquivos primeiro.</p>
+                        <div class="col-lg-8">
+                            <div class="card" style="backdrop-filter: blur(10px); background: rgba(255, 255, 255, 0.1); border-radius: 20px;">
+                                <div class="card-body text-center p-5">
+                                    <i class="fas fa-flag fs-1 mb-4" style="color: #28a745;"></i>
+                                    <h2 class="text-white mb-4">🇧🇷 Filtro Aplicado</h2>
+                                    <div class="alert alert-warning">
+                                        <i class="fas fa-info-circle me-2"></i>
+                                        <strong>Nenhuma URL brasileira encontrada</strong> nos dados processados
                                     </div>
-
-                                    <a href="/" class="btn btn-primary">
-                                        <i class="fas fa-upload me-2"></i>
-                                        Fazer Upload
+                                    <a href="/" class="btn btn-light btn-lg">
+                                        <i class="fas fa-home me-2"></i>
+                                        Página Principal
                                     </a>
                                 </div>
                             </div>
@@ -1014,369 +1403,31 @@ def download():
                 </div>
             </body>
             </html>
-            """
-            return error_html
-
-        # Download direto da memória - sem arquivos temporários
-        linhas_finais = session_data['all_lines']
-        linhas_finais_count = len(linhas_finais)
-
-        app.logger.info(f"Download direto: {linhas_finais_count:,} linhas")
-
-        # Nome do arquivo
-        filename = f"{session_data.get('nome_arquivo_final', 'resultado_final')}.txt"
-
-        # Cria conteúdo final na memória
-        conteudo_final = '\n'.join(linhas_finais)
-
-        return Response(
-            conteudo_final,
-            mimetype='text/plain',
-            headers={
-                'Content-Disposition': f'attachment; filename={filename}',
-                'Content-Type': 'text/plain; charset=utf-8'
-            }
-        )
-
-    except MemoryError:
-        app.logger.error("Erro de memória ao salvar arquivo")
-        return "Arquivo muito grande para processar. Tente dividir em arquivos menores.", 413
-    except Exception as write_error:
-        app.logger.error(f"Erro ao escrever arquivo: {write_error}")
-        return "Erro ao criar arquivo para download", 500
-
-
-@app.route("/txt-to-db", methods=["GET", "POST"])
-def txt_to_db():
-    """Página para converter arquivos TXT em banco de dados SQLite"""
-
-    if request.method == "POST":
-        try:
-            # Pega o nome do arquivo DB
-            db_filename = request.form.get("db_filename", "database").strip()
-            if not db_filename:
-                db_filename = "database"
-
-            # Processa múltiplos arquivos
-            arquivos_processados = []
-            total_linhas = 0
-
-            # Cria arquivo temporário para o banco SQLite (será removido após download)
-            db_path = os.path.join(tempfile.gettempdir(), f"{db_filename}.db")
-
-            # Conecta ao banco SQLite
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-
-            # Cria a tabela para armazenar os dados
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS credentials (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    url TEXT NOT NULL,
-                    username TEXT NOT NULL,
-                    password TEXT NOT NULL,
-                    source_file TEXT NOT NULL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-
-            for i in range(1, 5):  # file1, file2, file3, file4
-                file = request.files.get(f"file{i}")
-                if file and file.filename and file.filename.endswith(".txt"):
-                    try:
-                        # lê o conteúdo do arquivo
-                        content = file.read().decode("utf-8", errors="ignore").splitlines()
-                        linhas_inseridas = 0
-
-                        for linha in content:
-                            linha_limpa = linha.strip()
-                            if linha_limpa and linha_valida(linha_limpa):
-                                # Extrai URL, user e password
-                                partes = linha_limpa.split(':')
-                                if linha_limpa.startswith('https://') and len(partes) >= 4:
-                                    url = ':'.join(partes[:-2])
-                                    user = partes[-2]
-                                    password = partes[-1]
-                                elif linha_limpa.startswith('http://') and len(partes) >= 3:
-                                    url = ':'.join(partes[:-2])
-                                    user = partes[-2]
-                                    password = partes[-1]
-                                elif len(partes) == 3:
-                                    url, user, password = partes
-                                else:
-                                    continue
-
-                                # Insere no banco
-                                cursor.execute('''
-                                    INSERT INTO credentials (url, username, password, source_file)
-                                    VALUES (?, ?, ?, ?)
-                                ''', (url.strip(), user.strip(), password.strip(), file.filename))
-                                linhas_inseridas += 1
-
-                        total_linhas += linhas_inseridas
-                        arquivos_processados.append(f"{file.filename} ({linhas_inseridas} registros)")
-
-                    except Exception as e:
-                        app.logger.error(f"Erro ao processar arquivo {file.filename}: {e}")
-                        arquivos_processados.append(f"{file.filename} (erro)")
-
-            # Salva e fecha conexão
-            conn.commit()
-            conn.close()
-
-            if not arquivos_processados:
-                return render_template_string("""
-                <!doctype html>
-                <html lang="pt-BR" data-bs-theme="dark">
-                <head>
-                    <meta charset="utf-8">
-                    <title>Erro</title>
-                    <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
-                </head>
-                <body>
-                    <div class="container mt-5">
-                        <div class="alert alert-warning">
-                            <h4>Nenhum Arquivo</h4>
-                            <p>Selecione pelo menos um arquivo .txt para converter</p>
-                        </div>
-                        <a href="/txt-to-db" class="btn btn-secondary">Voltar</a>
-                    </div>
-                </body>
-                </html>
-                """)
-
-            # Mensagem de sucesso
-            lista_arquivos = "<br>".join([f"• {arq}" for arq in arquivos_processados])
-            return render_template_string(f"""
-            <!doctype html>
-            <html lang="pt-BR" data-bs-theme="dark">
-            <head>
-                <meta charset="utf-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1">
-                <title>Conversão Concluída</title>
-                <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
-                <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-            </head>
-            <body>
-                <div class="container mt-5">
-                    <div class="row justify-content-center">
-                        <div class="col-md-8 col-lg-6">
-                            <div class="card">
-                                <div class="card-body text-center">
-                                    <div class="alert alert-success">
-                                        <i class="fas fa-check-circle me-2 fs-4"></i>
-                                        <h4>Conversão Concluída!</h4>
-                                        <p><strong>{total_linhas} registros</strong> inseridos no banco:</p>
-                                        <div class="text-start">{lista_arquivos}</div>
-                                        <hr>
-                                        <small>Arquivo: <strong>{db_filename}.db</strong></small>
-                                    </div>
-
-                                    <div class="d-grid gap-2">
-                                        <a href="/txt-to-db" class="btn btn-primary">
-                                            <i class="fas fa-arrow-left me-2"></i>
-                                            Converter Mais Arquivos
-                                        </a>
-                                        <a href="/download-db/{db_filename}" class="btn btn-success">
-                                            <i class="fas fa-download me-2"></i>
-                                            Baixar {db_filename}.db
-                                        </a>
-                                        <a href="/" class="btn btn-secondary">
-                                            <i class="fas fa-home me-2"></i>
-                                            Página Principal
-                                        </a>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </body>
-            </html>
             """)
 
-        except Exception as e:
-            app.logger.error(f"Erro na conversão: {e}")
-            return render_template_string("""
-            <!doctype html>
-            <html lang="pt-BR" data-bs-theme="dark">
-            <head>
-                <meta charset="utf-8">
-                <title>Erro</title>
-                <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
-            </head>
-            <body>
-                <div class="container mt-5">
-                    <div class="alert alert-danger">
-                        <h4>Erro na Conversão</h4>
-                        <p>Ocorreu um erro ao processar os arquivos. Tente novamente.</p>
-                    </div>
-                    <a href="/txt-to-db" class="btn btn-secondary">Tentar Novamente</a>
-                </div>
-            </body>
-            </html>
-            """)
-
-    # GET request - mostra o formulário
-    return render_template_string("""
-    <!doctype html>
-    <html lang="pt-BR" data-bs-theme="dark">
-    <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Converter TXT para DB</title>
-        <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
-        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    </head>
-    <body>
-        <div class="container mt-5">
-            <div class="row justify-content-center">
-                <div class="col-md-8 col-lg-6">
-                    <div class="card">
-                        <div class="card-header text-center">
-                            <h2 class="card-title mb-0">
-                                <i class="fas fa-database me-2"></i>
-                                Converter TXT para DB
-                            </h2>
-                        </div>
-                        <div class="card-body">
-                            <div class="alert alert-info">
-                                <i class="fas fa-info-circle me-2"></i>
-                                <strong>Converta arquivos TXT em banco SQLite (.db)</strong><br>
-                                <small>Os dados serão organizados em tabela com colunas: URL, Usuário, Senha</small>
-                            </div>
-
-                            <form method="post" enctype="multipart/form-data" class="mb-4">
-                                <div class="mb-3">
-                                    <label class="form-label">
-                                        <i class="fas fa-file-text me-2"></i>
-                                        Selecione até 4 arquivos (.txt/.rar/.zip)
-                                    </label>
-                                    <input type="file" class="form-control mb-2" name="file1" accept=".txt">
-                                    <input type="file" class="form-control mb-2" name="file2" accept=".txt">
-                                    <input type="file" class="form-control mb-2" name="file3" accept=".txt">
-                                    <input type="file" class="form-control mb-2" name="file4" accept=".txt">
-                                </div>
-
-                                <div class="mb-3">
-                                    <label for="db_filename" class="form-label">
-                                        <i class="fas fa-database me-2"></i>
-                                        Nome do banco de dados
-                                    </label>
-                                    <input type="text" 
-                                           class="form-control" 
-                                           id="db_filename" 
-                                           name="db_filename" 
-                                           placeholder="database" 
-                                           value="database">
-                                    <small class="text-muted">O banco será salvo como [nome].db</small>
-                                </div>
-
-                                <div class="d-grid">
-                                    <button type="submit" class="btn btn-primary">
-                                        <i class="fas fa-cogs me-2"></i>
-                                        Converter para DB
-                                    </button>
-                                </div>
-                            </form>
-
-                            <div class="text-center">
-                                <a href="/" class="btn btn-secondary">
-                                    <i class="fas fa-arrow-left me-2"></i>
-                                    Voltar para Página Principal
-                                </a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </body>
-    </html>
-    """)
-
-@app.route("/download-db/<filename>")
-def download_db(filename):
-    """Rota para download do arquivo de banco de dados"""
-    try:
-        # Procura arquivo temporário
-        db_path = os.path.join(tempfile.gettempdir(), f"{filename}.db")
-        if os.path.exists(db_path):
-            # Programa limpeza do arquivo após download
-            def cleanup_file(): # Renamed from cleanup_db to cleanup_file
-                try:
-                    if os.path.exists(db_path):
-                        os.remove(db_path)
-                        app.logger.info(f"Arquivo DB temporário removido: {filename}.db")
-                except Exception as cleanup_error:
-                    app.logger.error(f"Erro ao limpar DB: {cleanup_error}")
-
-            # Agenda limpeza para após o download
-            import threading
-            timer = threading.Timer(30.0, cleanup_file)  # Remove após 30 segundos
-            timer.start()
-
-            return send_file(db_path, as_attachment=True, download_name=f"{filename}.db")
-        else:
-            return "Arquivo não encontrado", 404
-    except Exception as e:
-        app.logger.error(f"Erro ao baixar DB: {e}")
-        return "Erro ao baixar arquivo", 500
-
-@app.route("/filter-br")
-def filter_br():
-    """Rota para filtrar apenas URLs brasileiras"""
-    global session_data
-
-    if not session_data['all_lines']:
-        return render_template_string("""
-        <!doctype html>
-        <html lang="pt-BR" data-bs-theme="dark">
-        <head>
-            <meta charset="utf-8">
-            <title>Filtro BR</title>
-            <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
-            <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-        </head>
-        <body>
-            <div class="container mt-5">
-                <div class="alert alert-warning">
-                    <i class="fas fa-exclamation-triangle me-2"></i>
-                    <h4>Nenhum dado processado</h4>
-                    <p>Você precisa processar arquivos primeiro antes de filtrar URLs brasileiras.</p>
-                </div>
-                <a href="/" class="btn btn-primary">Voltar e Processar Arquivos</a>
-            </div>
-        </body>
-        </html>
-        """)
-
-    # Filtra URLs brasileiras
-    urls_br = filtrar_urls_brasileiras(session_data['all_lines'])
-
-    # Cria arquivo temporário com URLs brasileiras
-    nome_arquivo = f"urls_brasileiras_{len(urls_br)}"
-    arquivo_temp = os.path.join(tempfile.gettempdir(), f"{nome_arquivo}.txt")
-
-    try:
-        with open(arquivo_temp, 'w', encoding='utf-8') as f:
-            for url in urls_br:
-                # Remove caracteres de escape e formata corretamente
-                url_limpa = url.replace('\n', '').replace('\r', '').strip()
-                if url_limpa:
-                    f.write(f"{url_limpa}\n")
+        # Salva URLs brasileiras em arquivo temporário
+        nome_arquivo = session_data['nome_arquivo_final'] or "resultado_final"
+        nome_arquivo_br = f"{nome_arquivo}_brasileiro"
+        
+        file_path = os.path.join(tempfile.gettempdir(), f"{nome_arquivo_br}.txt")
+        
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(urls_br))
+        
+        app.logger.info(f"Arquivo brasileiro criado: {nome_arquivo_br}.txt com {len(urls_br)} URLs")
 
         return render_template_string(f"""
         <!doctype html>
         <html lang="pt-BR" data-bs-theme="dark">
         <head>
             <meta charset="utf-8">
-            <title>URLs Brasileiras Filtradas</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>🇧🇷 Filtro Brasileiro</title>
             <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
             <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
             <style>
                 body {{
-                    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+                    background: linear-gradient(135deg, #ff7b7b 0%, #ff9a56 100%);
                     min-height: 100vh;
                 }}
                 .main-card {{
@@ -1406,7 +1457,7 @@ def filter_br():
                                 </div>
 
                                 <div class="d-grid gap-2 d-md-flex justify-content-md-center mt-4">
-                                    <a href="/download-filtered/{nome_arquivo}" class="btn btn-success btn-lg">
+                                    <a href="/download-filtered/{nome_arquivo_br}" class="btn btn-success btn-lg">
                                         <i class="fas fa-download me-2"></i>
                                         Baixar URLs .BR
                                     </a>
@@ -1444,7 +1495,7 @@ def download_filtered(filename):
                     app.logger.error(f"Erro ao limpar arquivo filtrado: {cleanup_error}")
 
             import threading
-            timer = threading.Timer(30.0, cleanup_file)  # Remove após 30 segundos
+            timer = threading.Timer(30.0, cleanup_file)
             timer.start()
 
             return send_file(file_path, as_attachment=True, download_name=f"{filename}.txt")
@@ -1453,6 +1504,268 @@ def download_filtered(filename):
     except Exception as e:
         app.logger.error(f"Erro ao baixar arquivo filtrado: {e}")
         return "Erro ao baixar arquivo", 500
+
+@app.route("/txt-to-db")
+def txt_to_db():
+    """Converte dados processados para SQLite"""
+    global session_data
+    
+    if not session_data['all_lines']:
+        return "Nenhuma linha processada ainda. <a href='/'>Voltar</a>", 404
+
+    try:
+        # Cria arquivo de banco temporário
+        nome_arquivo = session_data['nome_arquivo_final'] or "resultado_final"
+        db_filename = f"{nome_arquivo}_database.db"
+        db_path = os.path.join(tempfile.gettempdir(), db_filename)
+        
+        # Remove arquivo existente se houver
+        if os.path.exists(db_path):
+            os.remove(db_path)
+
+        # Cria banco SQLite
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        # Cria tabela de credenciais
+        cursor.execute('''
+        CREATE TABLE credenciais (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            url TEXT NOT NULL,
+            usuario TEXT NOT NULL,
+            senha TEXT NOT NULL,
+            linha_completa TEXT NOT NULL,
+            dominio TEXT,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+
+        # Cria índices para melhor performance
+        cursor.execute('CREATE INDEX idx_url ON credenciais(url)')
+        cursor.execute('CREATE INDEX idx_dominio ON credenciais(dominio)')
+
+        # Insere dados
+        dados_inseridos = 0
+        for linha in session_data['all_lines']:
+            try:
+                # Parse da linha
+                partes = linha.split(':')
+                if len(partes) >= 3:
+                    if linha.startswith('https://'):
+                        url = ':'.join(partes[:-2])
+                        usuario = partes[-2]
+                        senha = partes[-1]
+                    elif linha.startswith('http://'):
+                        url = ':'.join(partes[:-2])
+                        usuario = partes[-2]
+                        senha = partes[-1]
+                    else:
+                        url, usuario, senha = partes[0], partes[1], partes[2]
+
+                    # Extrai domínio
+                    dominio = ""
+                    try:
+                        if url.startswith(('http://', 'https://')):
+                            from urllib.parse import urlparse
+                            parsed = urlparse(url)
+                            dominio = parsed.netloc
+                        else:
+                            dominio = url.split('/')[0]
+                    except:
+                        dominio = url
+
+                    cursor.execute('''
+                    INSERT INTO credenciais (url, usuario, senha, linha_completa, dominio)
+                    VALUES (?, ?, ?, ?, ?)
+                    ''', (url, usuario, senha, linha, dominio))
+                    
+                    dados_inseridos += 1
+
+            except Exception as parse_error:
+                app.logger.warning(f"Erro ao processar linha: {linha[:50]}... - {parse_error}")
+
+        conn.commit()
+        conn.close()
+
+        app.logger.info(f"Banco SQLite criado: {db_filename} com {dados_inseridos} registros")
+
+        return render_template_string(f"""
+        <!doctype html>
+        <html lang="pt-BR" data-bs-theme="dark">
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>🗄️ Conversão para Banco</title>
+            <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+            <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+            <style>
+                body {{
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                }}
+                .main-card {{
+                    backdrop-filter: blur(10px);
+                    background: rgba(255, 255, 255, 0.1);
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    border-radius: 20px;
+                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container py-5">
+                <div class="row justify-content-center">
+                    <div class="col-lg-8">
+                        <div class="card main-card">
+                            <div class="card-header text-center py-4" style="background: linear-gradient(45deg, #ffecd2 0%, #fcb69f 100%);">
+                                <h1 class="card-title mb-2 text-dark">
+                                    <i class="fas fa-database me-3"></i>🗄️ Banco SQLite Criado
+                                </h1>
+                                <p class="mb-0 text-dark">Conversão concluída com sucesso</p>
+                            </div>
+                            <div class="card-body p-4 text-center">
+                                <div class="alert alert-success border-0" style="background: rgba(40, 167, 69, 0.2); border-radius: 15px;">
+                                    <i class="fas fa-check-circle me-2 fs-4"></i>
+                                    <strong>{dados_inseridos:,}</strong> registros inseridos no banco de dados
+                                </div>
+
+                                <div class="alert alert-info border-0" style="background: rgba(23, 162, 184, 0.2); border-radius: 15px;">
+                                    <h6><i class="fas fa-table me-2"></i>Estrutura da Tabela 'credenciais':</h6>
+                                    <ul class="list-unstyled text-start mb-0">
+                                        <li>• <strong>id:</strong> Chave primária</li>
+                                        <li>• <strong>url:</strong> URL do site</li>
+                                        <li>• <strong>usuario:</strong> Nome de usuário</li>
+                                        <li>• <strong>senha:</strong> Senha</li>
+                                        <li>• <strong>dominio:</strong> Domínio extraído da URL</li>
+                                        <li>• <strong>criado_em:</strong> Timestamp da inserção</li>
+                                    </ul>
+                                </div>
+
+                                <div class="d-grid gap-2 d-md-flex justify-content-md-center mt-4">
+                                    <a href="/download-db/{db_filename[:-3]}" class="btn btn-info btn-lg">
+                                        <i class="fas fa-download me-2"></i>
+                                        💾 Baixar Banco SQLite
+                                    </a>
+                                    <a href="/" class="btn btn-secondary btn-lg">
+                                        <i class="fas fa-home me-2"></i>
+                                        Página Principal
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        """)
+
+    except Exception as e:
+        app.logger.error(f"Erro ao criar banco SQLite: {e}")
+        return "Erro ao criar banco de dados", 500
+
+@app.route("/download-db/<filename>")
+def download_db(filename):
+    """Download do arquivo de banco SQLite"""
+    try:
+        db_path = os.path.join(tempfile.gettempdir(), f"{filename}.db")
+        if os.path.exists(db_path):
+            # Agenda limpeza do arquivo após o download
+            def cleanup_file():
+                try:
+                    if os.path.exists(db_path):
+                        os.remove(db_path)
+                        app.logger.info(f"Banco SQLite temporário removido: {filename}.db")
+                except Exception as cleanup_error:
+                    app.logger.error(f"Erro ao limpar banco SQLite: {cleanup_error}")
+
+            import threading
+            timer = threading.Timer(60.0, cleanup_file) # 60 segundos para download do banco
+            timer.start()
+
+            return send_file(db_path, as_attachment=True, download_name=f"{filename}.db")
+        else:
+            return "Banco de dados não encontrado", 404
+    except Exception as e:
+        app.logger.error(f"Erro ao baixar banco: {e}")
+        return "Erro ao baixar banco", 500
+
+@app.route("/clear-data")
+def clear_data():
+    """Limpa todos os dados processados"""
+    global session_data
+    
+    # Limpa dados da sessão
+    linhas_removidas = len(session_data['all_lines'])
+    session_data['all_lines'] = []
+    session_data['stats'] = {
+        'total_lines': 0,
+        'valid_lines': 0,
+        'brazilian_urls': 0,
+        'domains': {}
+    }
+    
+    app.logger.info(f"Dados limpos: {linhas_removidas} linhas removidas")
+    
+    return render_template_string(f"""
+    <!doctype html>
+    <html lang="pt-BR" data-bs-theme="dark">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>🗑️ Dados Limpos</title>
+        <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+        <style>
+            body {{
+                background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+                min-height: 100vh;
+            }}
+            .main-card {{
+                backdrop-filter: blur(10px);
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 20px;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container py-5">
+            <div class="row justify-content-center">
+                <div class="col-lg-8">
+                    <div class="card main-card">
+                        <div class="card-header text-center py-4" style="background: linear-gradient(45deg, #ff6b6b 0%, #ee5a52 100%);">
+                            <h1 class="card-title mb-2 text-white">
+                                <i class="fas fa-trash-alt me-3"></i>🗑️ Dados Limpos
+                            </h1>
+                            <p class="mb-0 text-white-50">Sistema resetado com sucesso</p>
+                        </div>
+                        <div class="card-body p-4 text-center">
+                            <div class="alert alert-success border-0" style="background: rgba(40, 167, 69, 0.2); border-radius: 15px;">
+                                <i class="fas fa-check-circle me-2 fs-4"></i>
+                                <strong>{linhas_removidas:,}</strong> linhas foram removidas da memória
+                            </div>
+                            
+                            <div class="alert alert-info border-0" style="background: rgba(23, 162, 184, 0.2); border-radius: 15px;">
+                                <i class="fas fa-info-circle me-2"></i>
+                                <strong>Sistema Resetado:</strong> Pronto para processar novos arquivos
+                            </div>
+
+                            <div class="d-grid gap-2 d-md-flex justify-content-md-center mt-4">
+                                <a href="/" class="btn btn-success btn-lg">
+                                    <i class="fas fa-home me-2"></i>
+                                    Página Principal
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """)
 
 @app.route("/db-preview", methods=["GET", "POST"])
 def db_preview():
@@ -1741,6 +2054,5 @@ def db_preview():
     </html>
     """)
 
-# Sem limite de tamanho de upload
-# app.config['MAX_CONTENT_LENGTH'] removido
+# Configuração de cache
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
