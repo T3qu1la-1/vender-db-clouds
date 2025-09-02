@@ -446,10 +446,6 @@ html_form = """
                                     <i class="fas fa-search me-2"></i>
                                     🔍 Visualizar DB
                                 </a>
-                                <a href="/preview-files" class="btn btn-warning btn-lg">
-                                    <i class="fas fa-eye me-2"></i>
-                                    👀 Preview Arquivos
-                                </a>
                             </div>
                         </div>
                     </div>
@@ -940,44 +936,28 @@ def download():
             """
             return error_html
         
-        # Salva arquivo com todas as linhas processadas (sem otimização)
-        global nome_arquivo_final
-        
-        # Mantém todas as linhas como foram processadas
+        # Download direto da memória - sem arquivos temporários
         linhas_finais = session_data['all_lines']
         linhas_finais_count = len(linhas_finais)
         
-        app.logger.info(f"Salvando arquivo com todas as {linhas_finais_count:,} linhas processadas (sem otimização)")
+        app.logger.info(f"Download direto: {linhas_finais_count:,} linhas")
         
-        # Cria arquivo temporário (será deletado após download)
-        filename = f"{nome_arquivo_final}_completo.txt"
-        caminho_saida = os.path.join(tempfile.gettempdir(), filename)
+        # Nome do arquivo
+        filename = f"{session_data.get('nome_arquivo_final', 'resultado_final')}.txt"
         
-        app.logger.info(f"Salvando arquivo: {filename} ({linhas_finais_count:,} linhas)")
+        # Cria conteúdo final na memória
+        conteudo_final = '\n'.join(linhas_finais)
         
-        try:
-            with open(caminho_saida, "w", encoding="utf-8", buffering=8192) as f:
-                # Adiciona cabeçalho informativo
-                f.write(f"# Arquivo completo - {linhas_finais_count:,} linhas processadas\n")
-                f.write(f"# Formato: url:user:pass\n")
-                f.write(f"# Processado em: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write("# TODAS as linhas válidas foram mantidas (sem remoção de duplicatas)\n")
-                f.write("# =================================\n\n")
-                
-                # Escreve em chunks para arquivos grandes
-                if len(linhas_finais) > 100000:  # Para arquivos grandes
-                    app.logger.info("Escrevendo arquivo grande em chunks...")
-                    chunk_size = 10000
-                    for i in range(0, len(linhas_finais), chunk_size):
-                        chunk = linhas_finais[i:i+chunk_size]
-                        f.write("\n".join(chunk))
-                        if i + chunk_size < len(linhas_finais):
-                            f.write("\n")
-                        # Log apenas quando 25% do arquivo for escrito
-                        if (i // chunk_size) % 250 == 0:  # Log bem menos frequente
-                            app.logger.info(f"Escrito {i + len(chunk):,} linhas...")
-                else:
-                    f.write("\n".join(linhas_finais))
+        # Resposta HTTP direta
+        from flask import Response
+        return Response(
+            conteudo_final,
+            mimetype='text/plain',
+            headers={
+                'Content-Disposition': f'attachment; filename={filename}',
+                'Content-Type': 'text/plain; charset=utf-8'
+            }
+        )
                     
             app.logger.info(f"Arquivo salvo com sucesso: {filename}")
             
@@ -1710,5 +1690,6 @@ def db_preview():
     </html>
     """)
 
-# Configuração do tamanho máximo de upload - 100MB
-app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
+# Configuração do tamanho máximo de upload - 500MB
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
