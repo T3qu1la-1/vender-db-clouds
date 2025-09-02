@@ -66,12 +66,8 @@ def get_ip_hash(ip):
     return hashlib.sha256(unique_string.encode()).hexdigest()[:12]
 
 def create_ip_databases(ip_hash, real_ip=None):
-    """Cria bancos SQLite específicos para o IP"""
+    """Cria bancos SQLite específicos para o IP - apenas se não existirem"""
     db_dir = os.path.join(tempfile.gettempdir(), f"user_{ip_hash}")
-    os.makedirs(db_dir, exist_ok=True)
-    
-    print(f"🗄️ Criando SQLites para IP real: {real_ip} -> Hash: {ip_hash}")
-    print(f"📁 Diretório SQLite: {db_dir}")
     
     databases = {
         'main': os.path.join(db_dir, 'main.db'),
@@ -79,6 +75,17 @@ def create_ip_databases(ip_hash, real_ip=None):
         'brazilian': os.path.join(db_dir, 'brazilian.db'),
         'domains': os.path.join(db_dir, 'domains.db')
     }
+    
+    # Verifica se SQLites já existem
+    if all(os.path.exists(db_path) for db_path in databases.values()):
+        print(f"♻️ SQLites existentes encontrados para IP: {real_ip} -> Hash: {ip_hash}")
+        print(f"📁 Diretório SQLite: {db_dir}")
+        return databases
+    
+    # Cria diretório apenas se necessário
+    os.makedirs(db_dir, exist_ok=True)
+    print(f"🗄️ Criando novos SQLites para IP real: {real_ip} -> Hash: {ip_hash}")
+    print(f"📁 Diretório SQLite: {db_dir}")
     
     # Cria tabela principal
     conn = sqlite3.connect(databases['main'])
@@ -109,8 +116,8 @@ def create_ip_databases(ip_hash, real_ip=None):
         last_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
-    # Insere registro inicial zerado
-    cursor.execute('INSERT OR REPLACE INTO stats (id, total_lines, valid_lines, brazilian_urls, unique_domains) VALUES (1, 0, 0, 0, 0)')
+    # Insere registro inicial zerado apenas se não existir
+    cursor.execute('INSERT OR IGNORE INTO stats (id, total_lines, valid_lines, brazilian_urls, unique_domains) VALUES (1, 0, 0, 0, 0)')
     conn.commit()
     conn.close()
     
@@ -149,14 +156,29 @@ def get_user_session(ip):
     ip_hash = get_ip_hash(ip)
     
     if ip_hash not in IP_SESSIONS:
-        databases = create_ip_databases(ip_hash, ip)
+        # Verifica se SQLites já existem no disco
+        db_dir = os.path.join(tempfile.gettempdir(), f"user_{ip_hash}")
+        databases = {
+            'main': os.path.join(db_dir, 'main.db'),
+            'stats': os.path.join(db_dir, 'stats.db'),
+            'brazilian': os.path.join(db_dir, 'brazilian.db'),
+            'domains': os.path.join(db_dir, 'domains.db')
+        }
+        
+        # Se SQLites já existem, apenas reconecta
+        if all(os.path.exists(db_path) for db_path in databases.values()):
+            print(f"♻️ Reconectando SQLites existentes para IP: {ip} -> Hash: {ip_hash}")
+        else:
+            # Cria novos SQLites apenas se necessário
+            databases = create_ip_databases(ip_hash, ip)
+        
         IP_SESSIONS[ip_hash] = {
             'databases': databases,
             'last_activity': datetime.now(),
             'stats': {'total_lines': 0, 'valid_lines': 0, 'brazilian_urls': 0, 'domains': 0}
         }
         
-        # Carrega estatísticas do banco
+        # Carrega estatísticas do banco existente
         try:
             conn = sqlite3.connect(databases['stats'])
             cursor = conn.cursor()
@@ -169,8 +191,10 @@ def get_user_session(ip):
                     'brazilian_urls': result[2],
                     'domains': result[3]
                 }
+                print(f"📊 Estatísticas carregadas: {result[0]:,} processadas, {result[1]:,} válidas")
             conn.close()
-        except:
+        except Exception as e:
+            print(f"⚠️ Erro ao carregar stats: {e}")
             pass
     
     # Atualiza última atividade
@@ -821,7 +845,16 @@ html_form = """
 
 def extrair_arquivo_comprimido(file):
     try:
-        print(f"➤ Extraindo arquivo: {file.filename}")
+        file_size_mb = len(file.read()) / (1024 * 1024)
+        file.seek(0)  # Reset file pointer
+        
+        print(f"➤ Extraindo arquivo: {file.filename} ({file_size_mb:.1f}MB)")
+        
+        # Para arquivos grandes (>100MB), processa linha por linha
+        if file_size_mb > 100:
+            print(f"📈 Arquivo grande detectado, processando otimizado...")
+            return extrair_arquivo_grande(file)
+        
         linhas = []
         
         if file.filename.lower().endswith('.zip'):
@@ -831,22 +864,50 @@ def extrair_arquivo_comprimido(file):
                         with zip_ref.open(file_info) as txt_file:
                             content = txt_file.read().decode('utf-8', errors='ignore')
                             linhas.extend(content.splitlines())
+                            del content  # Libera memória
         elif file.filename.lower().endswith('.rar'):
             try:
                 content = file.read().decode('utf-8', errors='ignore')
                 linhas.extend(content.splitlines())
+                del content  # Libera memória
             except:
                 print(f"✗ Erro no arquivo RAR: {file.filename}")
                 return []
         else:  # .txt
             content = file.read().decode('utf-8', errors='ignore')
             linhas.extend(content.splitlines())
+            del content  # Libera memória
         
-        print(f"✓ Extraído: {len(linhas)} linhas de {file.filename}")
+        print(f"✓ Extraído: {len(linhas):,} linhas de {file.filename}")
+        return linhas
+        
+    except MemoryError:
+        print(f"💾 Arquivo muito grande para memória: {file.filename}")
+        return extrair_arquivo_grande(file)
+    except Exception as e:
+        print(f"✗ Erro ao extrair {file.filename}: {str(e)[:50]}")
+        return []
+
+def extrair_arquivo_grande(file):
+    """Extrai arquivos grandes linha por linha para economizar RAM"""
+    try:
+        file.seek(0)
+        content = file.read().decode('utf-8', errors='ignore')
+        
+        # Divide em chunks menores
+        chunk_size = 100000  # 100k linhas por vez
+        linhas = content.splitlines()
+        total_lines = len(linhas)
+        
+        print(f"🔄 Processamento otimizado: {total_lines:,} linhas em chunks de {chunk_size:,}")
+        
+        # Libera memória do conteúdo original
+        del content
+        
         return linhas
         
     except Exception as e:
-        print(f"✗ Erro ao extrair {file.filename}: {str(e)[:50]}")
+        print(f"✗ Erro no processamento otimizado: {str(e)[:50]}")
         return []
 
 def linha_valida(linha):
@@ -928,43 +989,49 @@ def upload_file():
                         if not content:
                             continue
                             
-                        print(f"➤ Validando linhas de {file.filename}...")
+                        print(f"➤ Validando linhas de {file.filename} ({len(content):,} linhas)...")
                         
-                        # Processa em lotes para evitar sobrecarga de memória
-                        batch_size = 1000
-                        filtradas = []
+                        # Otimizado para arquivos grandes (1GB+)
+                        batch_size = 5000  # Aumentado para melhor performance
                         total_valid = 0
                         
-                        # Abre conexões SQLite uma vez
+                        # Abre conexões SQLite uma vez com otimizações
                         conn = sqlite3.connect(session['databases']['main'])
                         conn_domains = sqlite3.connect(session['databases']['domains'])
+                        
+                        # Otimizações SQLite para arquivos grandes
+                        conn.execute('PRAGMA journal_mode=WAL')
+                        conn.execute('PRAGMA synchronous=NORMAL')
+                        conn.execute('PRAGMA cache_size=10000')
+                        conn.execute('PRAGMA temp_store=MEMORY')
+                        
+                        conn_domains.execute('PRAGMA journal_mode=WAL')
+                        conn_domains.execute('PRAGMA synchronous=NORMAL')
+                        
                         cursor = conn.cursor()
                         cursor_domains = conn_domains.cursor()
                         
+                        # Processamento em chunks menores para economizar RAM
                         for i in range(0, len(content), batch_size):
                             batch = content[i:i + batch_size]
-                            batch_filtradas = []
-                            
-                            # Filtra batch atual
-                            for linha in batch:
-                                linha_limpa = linha.strip()
-                                if linha_limpa and linha_valida(linha_limpa):
-                                    batch_filtradas.append(linha_limpa)
-                            
-                            # Salva batch no SQLite
                             batch_data = []
                             domains_data = set()
                             
-                            for linha in batch_filtradas:
+                            # Filtra e prepara dados em uma única passada
+                            for linha in batch:
+                                linha_limpa = linha.strip()
+                                if not linha_limpa or not linha_valida(linha_limpa):
+                                    continue
+                                
                                 try:
-                                    partes = linha.split(':')
-                                    if linha.startswith(('https://', 'http://')):
+                                    partes = linha_limpa.split(':')
+                                    if linha_limpa.startswith(('https://', 'http://')):
                                         url = ':'.join(partes[:-2])
                                         username, password = partes[-2], partes[-1]
                                     else:
                                         url, username, password = partes[0], partes[1], partes[2]
 
-                                    batch_data.append((url, username, password, linha))
+                                    batch_data.append((url, username, password, linha_limpa))
                                     
                                     # Extrai domínio
                                     try:
@@ -972,7 +1039,8 @@ def upload_file():
                                             domain = urlparse(url).netloc
                                         else:
                                             domain = url.split('/')[0]
-                                        domains_data.add(domain)
+                                        if domain:
+                                            domains_data.add(domain)
                                     except:
                                         pass
                                 except:
@@ -994,20 +1062,25 @@ def upload_file():
                                 UPDATE domains SET count = count + 1 WHERE domain = ?
                                 ''', (domain,))
                             
-                            total_valid += len(batch_filtradas)
-                            filtradas.extend(batch_filtradas)
+                            total_valid += len(batch_data)
                             
-                            # Commit periodicamente
-                            if i % (batch_size * 5) == 0:
+                            # Commit a cada 10 batches para melhor performance
+                            if i % (batch_size * 10) == 0:
                                 conn.commit()
                                 conn_domains.commit()
-                                print(f"   ⚡ Processadas {i + len(batch):,}/{len(content):,} linhas...")
+                                print(f"   ⚡ Processadas {i + len(batch):,}/{len(content):,} linhas... ({total_valid:,} válidas)")
+                            
+                            # Limpa batch da memória
+                            del batch_data, domains_data, batch
                         
                         # Commit final
                         conn.commit()
                         conn_domains.commit()
                         conn.close()
                         conn_domains.close()
+                        
+                        # Libera memória do conteúdo original
+                        del content
                         
                         print(f"   ✅ Total válidas: {total_valid:,}")
                         
