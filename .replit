@@ -9,7 +9,7 @@ deploymentTarget = "autoscale"
 run = ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
 
 [workflows]
-runButton = "Project"
+runButton = "Upload Gigante - 500MB+"
 
 [[workflows.workflow]]
 name = "Project"
@@ -67,6 +67,15 @@ mode = "sequential"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "gunicorn --bind 0.0.0.0:5000 --reuse-port --reload --timeout 1800 --worker-connections 100 --max-requests 50 --max-requests-jitter 5 --worker-class sync --workers 1 --worker-tmp-dir /dev/shm --limit-request-field_size 8190 --limit-request-fields 100 --limit-request-line 4094 app:app"
+
+[[workflows.workflow]]
+name = "Upload Gigante - 500MB+"
+author = 47165609
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "gunicorn --bind 0.0.0.0:5000 --reuse-port --reload --timeout 3600 --worker-connections 50 --max-requests 10 --max-requests-jitter 2 --worker-class sync --workers 1 --worker-tmp-dir /dev/shm --limit-request-field_size 16384 --limit-request-fields 50 --limit-request-line 8192 --graceful-timeout 600 app:app"
 
 [[ports]]
 localPort = 5000
