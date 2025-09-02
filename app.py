@@ -585,7 +585,7 @@ def filtrar_urls_brasileiras(linhas):
     return urls_brasileiras
 
 def linha_valida(linha: str) -> bool:
-    """Verifica se a linha segue o padrão url:user:pass - versão melhorada"""
+    """Verifica se a linha segue EXATAMENTE o padrão url:user:pass - apenas HTTP/HTTPS"""
     if not linha or not linha.strip():
         return False
 
@@ -595,76 +595,59 @@ def linha_valida(linha: str) -> bool:
     if linha.startswith('"') and linha.endswith('"'):
         linha = linha[1:-1]
 
-    # Lida com formato "URL":"user":"pass" - substitui aspas entre os campos
-    if linha.count('":"') >= 2:
-        # Remove todas as aspas e substitui por separadores simples
-        linha = linha.replace('":"', ':').strip('"')
+    # Remove espaços extras
+    linha = linha.strip()
 
-    # Lida com formato "URL:user:pass" (aspas só no início/fim)
-    if linha.startswith('"') and linha.endswith('"'):
-        linha = linha[1:-1]
+    # Rejeita esquemas não-web (android://, ftp://, file://, etc.)
+    esquemas_rejeitados = [
+        'android://', 'ftp://', 'file://', 'ssh://', 'telnet://', 
+        'ldap://', 'ldaps://', 'smtp://', 'pop3://', 'imap://',
+        'bluetooth://', 'nfc://', 'sms://', 'tel://', 'mailto:',
+        'market://', 'intent://', 'package:'
+    ]
+    
+    for esquema in esquemas_rejeitados:
+        if linha.lower().startswith(esquema):
+            return False
 
-    # Remove espaços extras e caracteres de controle
-    linha = ' '.join(linha.split())
+    # Deve conter exatamente 2 dois pontos (:) para formato simples url:user:pass
+    # OU começar com http:// ou https:// (que terão mais dois pontos)
+    if not ':' in linha:
+        return False
 
-    # Tenta diferentes separadores comuns
-    separadores = [':', '|', ';', '\t', ' ']
+    partes = linha.split(':')
 
-    for sep in separadores:
-        if sep in linha:
-            partes = [p.strip() for p in linha.split(sep) if p.strip()]
-
-            # Verifica se tem pelo menos 3 partes não vazias
-            if len(partes) >= 3:
-                # Para URLs que começam com http:// ou https://
-                if partes[0].startswith(('http://', 'https://')):
-                    # Reconstrói a URL se foi dividida incorretamente
-                    if len(partes) >= 4 and partes[0].startswith('https://'):
-                        url = ':'.join(partes[:-2])  # Reconstrói HTTPS URL
-                        user = partes[-2].strip()
-                        password = partes[-1].strip()
-                        return bool(url and user and password and len(user) > 0 and len(password) > 0)
-                    elif len(partes) >= 3 and partes[0].startswith('http://'):
-                        url = ':'.join(partes[:-2])  # Reconstrói HTTP URL  
-                        user = partes[-2].strip()
-                        password = partes[-1].strip()
-                        return bool(url and user and password and len(user) > 0 and len(password) > 0)
-
-                # Para URLs sem protocolo ou outros formatos
-                url, user, password = partes[0], partes[1], partes[2]
-
-                # Valida se todas as partes têm conteúdo válido
-                if (url and user and password and 
-                    len(url.strip()) > 0 and 
-                    len(user.strip()) > 0 and 
-                    len(password.strip()) > 0):
-
-                    # Verifica se não são apenas caracteres especiais
-                    if (not all(c in '.:/-_' for c in url.strip()) and
-                        not all(c in '.:/-_' for c in user.strip()) and  
-                        not all(c in '.:/-_' for c in password.strip())):
-                        return True
-
-    # Fallback original para formato padrão url:user:pass
-    if ':' in linha:
-        partes = linha.split(":")
+    # Para URLs HTTPS (https://site.com:user:pass = 4 partes)
+    if linha.startswith('https://'):
+        if len(partes) >= 4:
+            url = ':'.join(partes[:-2])  # https://site.com
+            user = partes[-2].strip()
+            password = partes[-1].strip()
+            
+            # Valida se URL é web válida
+            if url.startswith('https://') and len(url) > 8:
+                return bool(user and password and len(user) > 0 and len(password) > 0)
+    
+    # Para URLs HTTP (http://site.com:user:pass = 3 partes)
+    elif linha.startswith('http://'):
         if len(partes) >= 3:
-            # Para HTTPS URLs
-            if linha.startswith('https://') and len(partes) >= 4:
-                url = ':'.join(partes[:-2])
-                user = partes[-2].strip()
-                password = partes[-1].strip()
-                return bool(url and user and password and len(user) > 0 and len(password) > 0)
-            # Para HTTP URLs  
-            elif linha.startswith('http://') and len(partes) >= 3:
-                url = ':'.join(partes[:-2])
-                user = partes[-2].strip()
-                password = partes[-1].strip()
-                return bool(url and user and password and len(user) > 0 and len(password) > 0)
-            # Formato simples de 3 partes
-            elif len(partes) == 3:
-                url, user, password = partes[0].strip(), partes[1].strip(), partes[2].strip()
-                return bool(url and user and password and len(url) > 0 and len(user) > 0 and len(password) > 0)
+            url = ':'.join(partes[:-2])  # http://site.com
+            user = partes[-2].strip()
+            password = partes[-1].strip()
+            
+            # Valida se URL é web válida
+            if url.startswith('http://') and len(url) > 7:
+                return bool(user and password and len(user) > 0 and len(password) > 0)
+    
+    # Para formato simples sem protocolo (site.com:user:pass = 3 partes)
+    elif len(partes) == 3:
+        url, user, password = partes[0].strip(), partes[1].strip(), partes[2].strip()
+        
+        # Valida se todas as partes têm conteúdo
+        if url and user and password and len(url) > 0 and len(user) > 0 and len(password) > 0:
+            # Verifica se URL parece ser um domínio válido (contém ponto ou é IP)
+            if ('.' in url or url.replace('.', '').isdigit()) and not url.startswith('/'):
+                return True
 
     return False
 
