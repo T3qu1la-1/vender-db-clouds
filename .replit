@@ -9,7 +9,7 @@ deploymentTarget = "autoscale"
 run = ["sh", "-c", "gunicorn --bind 0.0.0.0:5000 app:app"]
 
 [workflows]
-runButton = "Project"
+runButton = "Start application - Extended"
 
 [[workflows.workflow]]
 name = "Project"
@@ -36,7 +36,7 @@ mode = "sequential"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "gunicorn --bind 0.0.0.0:5000 --reuse-port --reload --timeout 120 main:app"
+args = "gunicorn --bind 0.0.0.0:5000 --reuse-port --reload --timeout 120 --worker-connections 1000 --max-requests 1000 --max-requests-jitter 100 app:app"
 
 [[ports]]
 localPort = 5000

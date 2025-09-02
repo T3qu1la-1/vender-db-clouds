@@ -930,55 +930,86 @@ def upload_file():
                             
                         print(f"➤ Validando linhas de {file.filename}...")
                         
+                        # Processa em lotes para evitar sobrecarga de memória
+                        batch_size = 1000
                         filtradas = []
-                        for linha in content:
-                            linha_limpa = linha.strip()
-                            if linha_limpa and linha_valida(linha_limpa):
-                                filtradas.append(linha_limpa)
+                        total_valid = 0
                         
-                        # Salva no SQLite principal
+                        # Abre conexões SQLite uma vez
                         conn = sqlite3.connect(session['databases']['main'])
+                        conn_domains = sqlite3.connect(session['databases']['domains'])
                         cursor = conn.cursor()
+                        cursor_domains = conn_domains.cursor()
                         
-                        for linha in filtradas:
-                            try:
-                                partes = linha.split(':')
-                                if linha.startswith(('https://', 'http://')):
-                                    url = ':'.join(partes[:-2])
-                                    username, password = partes[-2], partes[-1]
-                                else:
-                                    url, username, password = partes[0], partes[1], partes[2]
+                        for i in range(0, len(content), batch_size):
+                            batch = content[i:i + batch_size]
+                            batch_filtradas = []
+                            
+                            # Filtra batch atual
+                            for linha in batch:
+                                linha_limpa = linha.strip()
+                                if linha_limpa and linha_valida(linha_limpa):
+                                    batch_filtradas.append(linha_limpa)
+                            
+                            # Salva batch no SQLite
+                            batch_data = []
+                            domains_data = set()
+                            
+                            for linha in batch_filtradas:
+                                try:
+                                    partes = linha.split(':')
+                                    if linha.startswith(('https://', 'http://')):
+                                        url = ':'.join(partes[:-2])
+                                        username, password = partes[-2], partes[-1]
+                                    else:
+                                        url, username, password = partes[0], partes[1], partes[2]
 
-                                cursor.execute('''
+                                    batch_data.append((url, username, password, linha))
+                                    
+                                    # Extrai domínio
+                                    try:
+                                        if url.startswith(('http://', 'https://')):
+                                            domain = urlparse(url).netloc
+                                        else:
+                                            domain = url.split('/')[0]
+                                        domains_data.add(domain)
+                                    except:
+                                        pass
+                                except:
+                                    continue
+                            
+                            # Insert em lote para credenciais
+                            if batch_data:
+                                cursor.executemany('''
                                 INSERT INTO credentials (url, username, password, linha_completa)
                                 VALUES (?, ?, ?, ?)
-                                ''', (url, username, password, linha))
-                                
-                                # Adiciona domínio
-                                try:
-                                    if url.startswith(('http://', 'https://')):
-                                        domain = urlparse(url).netloc
-                                    else:
-                                        domain = url.split('/')[0]
-                                    
-                                    conn_domains = sqlite3.connect(session['databases']['domains'])
-                                    cursor_domains = conn_domains.cursor()
-                                    cursor_domains.execute('''
-                                    INSERT OR IGNORE INTO domains (domain) VALUES (?)
-                                    ''', (domain,))
-                                    cursor_domains.execute('''
-                                    UPDATE domains SET count = count + 1 WHERE domain = ?
-                                    ''', (domain,))
-                                    conn_domains.commit()
-                                    conn_domains.close()
-                                except:
-                                    pass
-
-                            except:
-                                continue
+                                ''', batch_data)
+                            
+                            # Insert em lote para domínios
+                            for domain in domains_data:
+                                cursor_domains.execute('''
+                                INSERT OR IGNORE INTO domains (domain) VALUES (?)
+                                ''', (domain,))
+                                cursor_domains.execute('''
+                                UPDATE domains SET count = count + 1 WHERE domain = ?
+                                ''', (domain,))
+                            
+                            total_valid += len(batch_filtradas)
+                            filtradas.extend(batch_filtradas)
+                            
+                            # Commit periodicamente
+                            if i % (batch_size * 5) == 0:
+                                conn.commit()
+                                conn_domains.commit()
+                                print(f"   ⚡ Processadas {i + len(batch):,}/{len(content):,} linhas...")
                         
+                        # Commit final
                         conn.commit()
+                        conn_domains.commit()
                         conn.close()
+                        conn_domains.close()
+                        
+                        print(f"   ✅ Total válidas: {total_valid:,}")
                         
                         # Processa URLs brasileiras
                         urls_br = filtrar_urls_brasileiras(filtradas)
@@ -992,10 +1023,10 @@ def upload_file():
                             conn_br.commit()
                             conn_br.close()
                         
-                        total_filtradas += len(filtradas)
-                        taxa = (len(filtradas) / len(content) * 100) if content else 0
-                        print(f"✓ {file.filename}: {len(filtradas)} válidas ({taxa:.1f}%)")
-                        arquivos_processados.append(f"{file.filename} ({len(filtradas)} válidas)")
+                        total_filtradas += total_valid
+                        taxa = (total_valid / len(content) * 100) if content else 0
+                        print(f"✓ {file.filename}: {total_valid} válidas ({taxa:.1f}%)")
+                        arquivos_processados.append(f"{file.filename} ({total_valid} válidas)")
                         
                     except Exception as e:
                         print(f"✗ Erro em {file.filename}: {str(e)[:50]}")
