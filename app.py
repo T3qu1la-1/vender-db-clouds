@@ -100,6 +100,22 @@ html_form = """
             background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
             border-radius: 20px 20px 0 0 !important;
             border: none;
+            position: relative;
+            overflow: hidden;
+        }
+        .card-header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.1) 50%, transparent 70%);
+            animation: shimmer 2s infinite;
+        }
+        @keyframes shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
         }
         .btn-gradient {
             background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
@@ -109,6 +125,24 @@ html_form = """
         .btn-gradient:hover {
             transform: scale(1.05);
             box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+        }
+        .btn-lg {
+            border-radius: 15px;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.3s ease;
+        }
+        .btn-lg:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+        }
+        .btn-warning {
+            background: linear-gradient(45deg, #ff7b7b 0%, #ff9a56 100%);
+            border: none;
+        }
+        .btn-primary {
+            background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%);
+            border: none;
         }
         .form-control {
             background: rgba(255, 255, 255, 0.1);
@@ -324,9 +358,17 @@ html_form = """
                                     <i class="fas fa-download me-2"></i>
                                     💾 Download Completo
                                 </a>
+                                <a href="/filter-br" class="btn btn-warning btn-lg">
+                                    <i class="fas fa-flag me-2"></i>
+                                    🇧🇷 Filtrar URLs .BR
+                                </a>
                                 <a href="/txt-to-db" class="btn btn-info btn-lg">
                                     <i class="fas fa-database me-2"></i>
                                     🗄️ Converter DB
+                                </a>
+                                <a href="/db-preview" class="btn btn-primary btn-lg">
+                                    <i class="fas fa-search me-2"></i>
+                                    🔍 Visualizar DB
                                 </a>
                             </div>
                         </div>
@@ -363,6 +405,18 @@ html_form = """
 </body>
 </html>
 """
+
+def filtrar_urls_brasileiras(linhas):
+    """Filtra apenas URLs que contêm domínios brasileiros (.br)"""
+    urls_brasileiras = []
+    dominios_br = ['.br', '.com.br', '.org.br', '.net.br', '.gov.br', '.edu.br']
+    
+    for linha in linhas:
+        linha_limpa = linha.strip()
+        if any(dominio in linha_limpa.lower() for dominio in dominios_br):
+            urls_brasileiras.append(linha_limpa)
+    
+    return urls_brasileiras
 
 def linha_valida(linha: str) -> bool:
     """Verifica se a linha segue o padrão url:user:pass - versão melhorada"""
@@ -1152,6 +1206,400 @@ def download_db(filename):
     except Exception as e:
         app.logger.error(f"Erro ao baixar DB: {e}")
         return "Erro ao baixar arquivo", 500
+
+@app.route("/filter-br")
+def filter_br():
+    """Rota para filtrar apenas URLs brasileiras"""
+    global all_lines
+    
+    if not all_lines:
+        return render_template_string("""
+        <!doctype html>
+        <html lang="pt-BR" data-bs-theme="dark">
+        <head>
+            <meta charset="utf-8">
+            <title>Filtro BR</title>
+            <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+            <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+        </head>
+        <body>
+            <div class="container mt-5">
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    <h4>Nenhum dado processado</h4>
+                    <p>Você precisa processar arquivos primeiro antes de filtrar URLs brasileiras.</p>
+                </div>
+                <a href="/" class="btn btn-primary">Voltar e Processar Arquivos</a>
+            </div>
+        </body>
+        </html>
+        """)
+    
+    # Filtra URLs brasileiras
+    urls_br = filtrar_urls_brasileiras(all_lines)
+    
+    # Cria arquivo temporário com URLs brasileiras
+    nome_arquivo = f"urls_brasileiras_{len(urls_br)}"
+    arquivo_temp = os.path.join(tempfile.gettempdir(), f"{nome_arquivo}.txt")
+    
+    try:
+        with open(arquivo_temp, 'w', encoding='utf-8') as f:
+            for url in urls_br:
+                f.write(f"{url}\\n")
+        
+        return render_template_string(f"""
+        <!doctype html>
+        <html lang="pt-BR" data-bs-theme="dark">
+        <head>
+            <meta charset="utf-8">
+            <title>URLs Brasileiras Filtradas</title>
+            <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+            <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+            <style>
+                body {{
+                    background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+                    min-height: 100vh;
+                }}
+                .main-card {{
+                    backdrop-filter: blur(10px);
+                    background: rgba(255, 255, 255, 0.1);
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    border-radius: 20px;
+                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container py-5">
+                <div class="row justify-content-center">
+                    <div class="col-lg-8">
+                        <div class="card main-card">
+                            <div class="card-header text-center py-4" style="background: linear-gradient(45deg, #ff7b7b 0%, #ff9a56 100%);">
+                                <h1 class="card-title mb-2 text-white">
+                                    <i class="fas fa-flag me-3"></i>🇧🇷 URLs Brasileiras
+                                </h1>
+                                <p class="mb-0 text-white-50">Filtro aplicado com sucesso</p>
+                            </div>
+                            <div class="card-body p-4 text-center">
+                                <div class="alert alert-success border-0" style="background: rgba(40, 167, 69, 0.2); border-radius: 15px;">
+                                    <i class="fas fa-check-circle me-2 fs-4"></i>
+                                    <strong>{len(urls_br):,}</strong> URLs brasileiras encontradas de <strong>{len(all_lines):,}</strong> total
+                                </div>
+                                
+                                <div class="d-grid gap-2 d-md-flex justify-content-md-center mt-4">
+                                    <a href="/download-filtered/{nome_arquivo}" class="btn btn-success btn-lg">
+                                        <i class="fas fa-download me-2"></i>
+                                        Baixar URLs .BR
+                                    </a>
+                                    <a href="/" class="btn btn-secondary btn-lg">
+                                        <i class="fas fa-home me-2"></i>
+                                        Página Principal
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        """)
+        
+    except Exception as e:
+        app.logger.error(f"Erro ao criar arquivo de URLs brasileiras: {e}")
+        return "Erro ao processar filtro", 500
+
+@app.route("/download-filtered/<filename>")
+def download_filtered(filename):
+    """Download do arquivo de URLs filtradas"""
+    try:
+        file_path = os.path.join(tempfile.gettempdir(), f"{filename}.txt")
+        if os.path.exists(file_path):
+            return send_file(file_path, as_attachment=True, download_name=f"{filename}.txt")
+        else:
+            return "Arquivo não encontrado", 404
+    except Exception as e:
+        app.logger.error(f"Erro ao baixar arquivo filtrado: {e}")
+        return "Erro ao baixar arquivo", 500
+
+@app.route("/db-preview", methods=["GET", "POST"])
+def db_preview():
+    """Visualizador de arquivos .db"""
+    if request.method == "POST":
+        try:
+            db_file = request.files.get("db_file")
+            if not db_file or not db_file.filename or not db_file.filename.endswith('.db'):
+                return render_template_string("""
+                <!doctype html>
+                <html lang="pt-BR" data-bs-theme="dark">
+                <head>
+                    <meta charset="utf-8">
+                    <title>Erro - Visualizador DB</title>
+                    <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+                </head>
+                <body>
+                    <div class="container mt-5">
+                        <div class="alert alert-danger">
+                            <h4>Arquivo Inválido</h4>
+                            <p>Por favor, selecione um arquivo .db válido.</p>
+                        </div>
+                        <a href="/db-preview" class="btn btn-secondary">Tentar Novamente</a>
+                    </div>
+                </body>
+                </html>
+                """)
+            
+            # Salva arquivo temporariamente
+            temp_db_path = os.path.join(tempfile.gettempdir(), f"preview_{db_file.filename}")
+            db_file.save(temp_db_path)
+            
+            # Conecta ao banco e obtém informações
+            conn = sqlite3.connect(temp_db_path)
+            cursor = conn.cursor()
+            
+            # Lista tabelas
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            tabelas = cursor.fetchall()
+            
+            preview_html = f"""
+            <!doctype html>
+            <html lang="pt-BR" data-bs-theme="dark">
+            <head>
+                <meta charset="utf-8">
+                <title>Preview: {db_file.filename}</title>
+                <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+                <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+                <style>
+                    body {{
+                        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+                        min-height: 100vh;
+                    }}
+                    .table-responsive {{
+                        max-height: 400px;
+                        overflow-y: auto;
+                        border-radius: 10px;
+                    }}
+                    .table {{
+                        background: rgba(255, 255, 255, 0.1);
+                        backdrop-filter: blur(5px);
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container py-4">
+                    <div class="card">
+                        <div class="card-header text-center" style="background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%);">
+                            <h2 class="text-white mb-0">
+                                <i class="fas fa-database me-2"></i>
+                                Preview: {db_file.filename}
+                            </h2>
+                        </div>
+                        <div class="card-body">
+                            <div class="alert alert-info">
+                                <i class="fas fa-info-circle me-2"></i>
+                                <strong>Tabelas encontradas:</strong> {len(tabelas)}
+                            </div>
+            """
+            
+            # Para cada tabela, mostra uma prévia
+            for tabela in tabelas:
+                nome_tabela = tabela[0]
+                cursor.execute(f"SELECT * FROM {nome_tabela} LIMIT 10")
+                dados = cursor.fetchall()
+                
+                # Obtém nomes das colunas
+                cursor.execute(f"PRAGMA table_info({nome_tabela})")
+                colunas_info = cursor.fetchall()
+                colunas = [col[1] for col in colunas_info]
+                
+                preview_html += f"""
+                <div class="mb-4">
+                    <h4><i class="fas fa-table me-2"></i>Tabela: {nome_tabela}</h4>
+                    <p class="text-muted">Mostrando até 10 registros</p>
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead class="table-dark">
+                                <tr>
+                """
+                
+                # Cabeçalhos
+                for coluna in colunas:
+                    preview_html += f"<th>{coluna}</th>"
+                
+                preview_html += """
+                                </tr>
+                            </thead>
+                            <tbody>
+                """
+                
+                # Dados
+                for linha in dados:
+                    preview_html += "<tr>"
+                    for valor in linha:
+                        # Trunca valores muito longos
+                        valor_str = str(valor)[:50] + "..." if len(str(valor)) > 50 else str(valor)
+                        preview_html += f"<td>{valor_str}</td>"
+                    preview_html += "</tr>"
+                
+                preview_html += """
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                """
+            
+            preview_html += """
+                            <div class="text-center">
+                                <a href="/db-preview" class="btn btn-primary me-2">
+                                    <i class="fas fa-upload me-2"></i>
+                                    Visualizar Outro DB
+                                </a>
+                                <a href="/" class="btn btn-secondary">
+                                    <i class="fas fa-home me-2"></i>
+                                    Página Principal
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            
+            conn.close()
+            
+            # Remove arquivo temporário
+            try:
+                os.remove(temp_db_path)
+            except:
+                pass
+            
+            return preview_html
+            
+        except Exception as e:
+            app.logger.error(f"Erro ao visualizar DB: {e}")
+            return render_template_string("""
+            <!doctype html>
+            <html lang="pt-BR" data-bs-theme="dark">
+            <head>
+                <meta charset="utf-8">
+                <title>Erro - Visualizador DB</title>
+                <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+            </head>
+            <body>
+                <div class="container mt-5">
+                    <div class="alert alert-danger">
+                        <h4>Erro ao Visualizar Banco</h4>
+                        <p>Ocorreu um erro ao processar o arquivo .db. Verifique se o arquivo não está corrompido.</p>
+                    </div>
+                    <a href="/db-preview" class="btn btn-secondary">Tentar Novamente</a>
+                </div>
+            </body>
+            </html>
+            """)
+    
+    # GET request - mostra formulário de upload
+    return render_template_string("""
+    <!doctype html>
+    <html lang="pt-BR" data-bs-theme="dark">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Visualizador de Banco de Dados</title>
+        <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+        <style>
+            body {
+                background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+                min-height: 100vh;
+            }
+            .main-card {
+                backdrop-filter: blur(10px);
+                background: rgba(255, 255, 255, 0.1);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 20px;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            }
+            .file-upload-area {
+                border: 2px dashed rgba(255, 255, 255, 0.3);
+                border-radius: 15px;
+                padding: 40px;
+                text-align: center;
+                transition: all 0.3s ease;
+                cursor: pointer;
+            }
+            .file-upload-area:hover {
+                border-color: #4facfe;
+                background: rgba(79, 172, 254, 0.1);
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container py-5">
+            <div class="row justify-content-center">
+                <div class="col-lg-8">
+                    <div class="card main-card">
+                        <div class="card-header text-center py-4" style="background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%);">
+                            <h1 class="card-title mb-2 text-white">
+                                <i class="fas fa-search me-3"></i>
+                                Visualizador de Banco de Dados
+                            </h1>
+                            <p class="mb-0 text-white-50">Upload e visualização segura de arquivos .db</p>
+                        </div>
+                        <div class="card-body p-4">
+                            <div class="alert alert-info border-0" style="background: rgba(79, 172, 254, 0.2); border-radius: 15px;">
+                                <i class="fas fa-shield-alt me-2 fs-4"></i>
+                                <div>
+                                    <strong>Seguro e Confiável:</strong> Visualização local sem armazenamento permanente
+                                    <br><small class="text-muted">
+                                        <i class="fas fa-check me-1"></i> Suporte a SQLite (.db)
+                                        <i class="fas fa-check me-1 ms-3"></i> Preview de tabelas e dados
+                                        <i class="fas fa-check me-1 ms-3"></i> Exclusão automática após visualização
+                                    </small>
+                                </div>
+                            </div>
+                            
+                            <form method="post" enctype="multipart/form-data">
+                                <div class="file-upload-area mb-4" onclick="document.getElementById('db_file').click()">
+                                    <i class="fas fa-cloud-upload-alt fs-1 text-primary mb-3"></i>
+                                    <h4>Clique para selecionar arquivo .db</h4>
+                                    <p class="text-muted">Ou arraste e solte aqui</p>
+                                    <input type="file" id="db_file" name="db_file" accept=".db" style="display: none;" onchange="updateFileName(this)">
+                                    <div id="fileName" class="mt-2"></div>
+                                </div>
+                                
+                                <div class="d-grid">
+                                    <button type="submit" class="btn btn-primary btn-lg">
+                                        <i class="fas fa-eye me-2"></i>
+                                        🔍 Visualizar Conteúdo do Banco
+                                    </button>
+                                </div>
+                            </form>
+                            
+                            <div class="text-center mt-4">
+                                <a href="/" class="btn btn-secondary btn-lg">
+                                    <i class="fas fa-arrow-left me-2"></i>
+                                    Voltar para Página Principal
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <script>
+            function updateFileName(input) {
+                const fileName = document.getElementById('fileName');
+                if (input.files[0]) {
+                    fileName.innerHTML = `<i class="fas fa-file-alt me-2"></i><strong>Arquivo selecionado:</strong> ${input.files[0].name}`;
+                    fileName.className = 'alert alert-success';
+                }
+            }
+        </script>
+    </body>
+    </html>
+    """)
 
 if __name__ == "__main__":
     # Configura o tamanho máximo de upload
