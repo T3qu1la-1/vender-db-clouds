@@ -59,6 +59,15 @@ mode = "sequential"
 task = "shell.exec"
 args = "gunicorn --bind 0.0.0.0:5000 --reuse-port --reload --timeout 600 --worker-connections 500 --max-requests 100 --max-requests-jitter 10 --worker-class sync --workers 1 --worker-tmp-dir /dev/shm app:app"
 
+[[workflows.workflow]]
+name = "Start High Performance"
+author = 47165609
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "gunicorn --bind 0.0.0.0:5000 --reuse-port --reload --timeout 1800 --worker-connections 100 --max-requests 50 --max-requests-jitter 5 --worker-class sync --workers 1 --worker-tmp-dir /dev/shm --limit-request-field_size 8190 --limit-request-fields 100 --limit-request-line 4094 app:app"
+
 [[ports]]
 localPort = 5000
 externalPort = 80

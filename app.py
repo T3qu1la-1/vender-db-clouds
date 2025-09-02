@@ -20,6 +20,10 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret-key-change-in-production")
 
+# Configurações para uploads grandes (até 2GB)
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024 * 1024  # 2GB
+app.config['UPLOAD_TIMEOUT'] = 1800  # 30 minutos
+
 # Sistema de sessões por IP com SQLite
 IP_SESSIONS = {}
 CLEANUP_TIMERS = {}
@@ -202,12 +206,17 @@ def get_user_session(ip):
 def processar_streaming_direto(file, session, ip_hash):
     """Processamento streaming direto para arquivos 1GB+ sem usar RAM"""
     try:
-        file.seek(0)
+        file.seek(0, 2)  # Vai para o final
+        file_size = file.tell()
+        file.seek(0)  # Volta para o início
+        file_size_mb = file_size / (1024 * 1024)
+        
         total_valid = 0
         linha_buffer = ""
-        chunk_size = 8192  # 8KB chunks muito pequenos
+        chunk_size = 32768  # 32KB chunks para melhor performance
+        bytes_processed = 0
         
-        print("🔥 MODO STREAMING: Processando direto para SQLite...")
+        print(f"🔥 MODO STREAMING: {file_size_mb:.1f}MB - Processando direto para SQLite...")
         
         # Conexões SQLite otimizadas para streaming
         conn = sqlite3.connect(session['databases']['main'])
@@ -231,10 +240,13 @@ def processar_streaming_direto(file, session, ip_hash):
         batch_count = 0
         
         while True:
-            # Lê chunk minúsculo
+            # Lê chunk otimizado
             chunk = file.read(chunk_size)
             if not chunk:
                 break
+            
+            bytes_processed += len(chunk)
+            progress = (bytes_processed / file_size) * 100
             
             try:
                 chunk_text = chunk.decode('utf-8', errors='ignore')
@@ -243,13 +255,17 @@ def processar_streaming_direto(file, session, ip_hash):
                 
             linha_buffer += chunk_text
             
-            # Processa linhas completas uma por uma
+            # Processa linhas completas em lote
+            lines_to_process = []
             while '\n' in linha_buffer:
                 linha, linha_buffer = linha_buffer.split('\n', 1)
                 linha_limpa = linha.strip()
                 
-                if not linha_limpa or not linha_valida(linha_limpa):
-                    continue
+                if linha_limpa and linha_valida(linha_limpa):
+                    lines_to_process.append(linha_limpa)
+            
+            # Processa lote de linhas
+            for linha_limpa in lines_to_process:
                 
                 try:
                     partes = linha_limpa.split(':')
@@ -279,21 +295,24 @@ def processar_streaming_direto(file, session, ip_hash):
                         
                     batch_count += 1
                     
-                    # Insert micro-batch a cada 100 linhas para não acumular RAM
-                    if len(batch_data) >= 100:
-                        cursor.executemany('INSERT INTO credentials (url, username, password, linha_completa) VALUES (?, ?, ?, ?)', batch_data)
-                        total_valid += len(batch_data)
-                        batch_data.clear()  # Limpa imediatamente
-                        
-                        # Commit frequente para streaming
-                        if batch_count % 10000 == 0:
-                            for db in [conn, conn_domains, conn_br]:
-                                db.commit()
-                                db.execute('BEGIN TRANSACTION')
-                            print(f"   🚀 STREAM: {total_valid:,} processadas...")
-                            
                 except:
                     continue
+            
+            # Insert batch a cada 500 linhas para arquivos grandes
+            if len(batch_data) >= 500:
+                cursor.executemany('INSERT INTO credentials (url, username, password, linha_completa) VALUES (?, ?, ?, ?)', batch_data)
+                total_valid += len(batch_data)
+                batch_data.clear()
+                
+                # Commit e progresso a cada 25000 linhas
+                if batch_count % 25000 == 0:
+                    for db in [conn, conn_domains, conn_br]:
+                        db.commit()
+                        db.execute('BEGIN TRANSACTION')
+                    print(f"   🚀 STREAM {progress:.1f}%: {total_valid:,} processadas, {bytes_processed/(1024*1024):.1f}MB lidos...")
+            
+            # Libera chunks processados da memória
+            del chunk, chunk_text, lines_to_process
             
             # Libera chunk imediatamente
             del chunk, chunk_text
@@ -1067,6 +1086,21 @@ html_form = """
     <script>
         function showLoading() {
             document.getElementById('loadingOverlay').style.display = 'flex';
+            
+            // Simula progresso para uploads grandes
+            let progress = 0;
+            const progressInterval = setInterval(() => {
+                progress += Math.random() * 5;
+                if (progress > 95) progress = 95;
+                
+                const loadingText = document.querySelector('#loadingOverlay div:last-child');
+                loadingText.innerHTML = `🔄 Processando... ${Math.round(progress)}%<br><small>Aguarde para arquivos grandes (500MB+)</small>`;
+            }, 2000);
+            
+            // Para quando a página recarregar
+            window.addEventListener('beforeunload', () => {
+                clearInterval(progressInterval);
+            });
         }
         
         function switchTab(tabName) {
