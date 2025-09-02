@@ -204,43 +204,60 @@ def get_user_session(ip):
     return IP_SESSIONS[ip_hash]
 
 def processar_streaming_direto(file, session, ip_hash):
-    """Processamento streaming direto para arquivos 1GB+ sem usar RAM"""
+    """Processamento streaming ultra-otimizado para arquivos 500MB+ direto nos shards"""
     try:
-        file.seek(0, 2)  # Vai para o final
+        file.seek(0, 2)
         file_size = file.tell()
-        file.seek(0)  # Volta para o início
+        file.seek(0)
         file_size_mb = file_size / (1024 * 1024)
         
+        print(f"🚀 STREAMING 500MB+: {file_size_mb:.1f}MB direto para 4 shards")
+        
+        # Abre conexões com os 4 shards simultaneamente
+        shard_connections = {}
+        for shard_num in range(4):
+            db_path = os.path.join(os.path.dirname(session['databases']['main']), f"upload_shard_{shard_num}.db")
+            conn = sqlite3.connect(db_path)
+            
+            # PRAGMA ultra-performance para 500MB+
+            conn.execute('PRAGMA journal_mode=OFF')
+            conn.execute('PRAGMA synchronous=OFF')
+            conn.execute('PRAGMA cache_size=200000')  # 200MB cache
+            conn.execute('PRAGMA temp_store=MEMORY')
+            conn.execute('PRAGMA mmap_size=2147483648')  # 2GB mmap
+            conn.execute('BEGIN TRANSACTION')
+            
+            # Cria tabela se não existir
+            cursor = conn.cursor()
+            cursor.execute('''
+            CREATE TABLE IF NOT EXISTS credentials (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL,
+                username TEXT NOT NULL,
+                password TEXT NOT NULL,
+                linha_completa TEXT NOT NULL,
+                file_source TEXT,
+                shard_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            ''')
+            conn.commit()
+            conn.execute('BEGIN TRANSACTION')
+            
+            shard_connections[shard_num] = conn
+            print(f"   📦 Shard {shard_num} preparado para streaming")
+        
+        # Streaming com distribuição nos shards
         total_valid = 0
         linha_buffer = ""
-        chunk_size = 32768  # 32KB chunks para melhor performance
+        chunk_size = 65536  # 64KB chunks para arquivos gigantes
         bytes_processed = 0
+        shard_batches = {0: [], 1: [], 2: [], 3: []}
+        batch_size = 1000
         
-        print(f"🔥 MODO STREAMING: {file_size_mb:.1f}MB - Processando direto para SQLite...")
-        
-        # Conexões SQLite otimizadas para streaming
-        conn = sqlite3.connect(session['databases']['main'])
-        conn_domains = sqlite3.connect(session['databases']['domains'])
-        conn_br = sqlite3.connect(session['databases']['brazilian'])
-        
-        # Configuração máxima performance para 1GB+
-        for db in [conn, conn_domains, conn_br]:
-            db.execute('PRAGMA journal_mode=OFF')
-            db.execute('PRAGMA synchronous=OFF')
-            db.execute('PRAGMA cache_size=100000')  # 100MB cache
-            db.execute('PRAGMA temp_store=MEMORY')
-            db.execute('PRAGMA mmap_size=1073741824')  # 1GB mmap
-            db.execute('BEGIN TRANSACTION')
-        
-        cursor = conn.cursor()
-        cursor_domains = conn_domains.cursor()
-        cursor_br = conn_br.cursor()
-        
-        batch_data = []
-        batch_count = 0
+        import hashlib
         
         while True:
-            # Lê chunk otimizado
             chunk = file.read(chunk_size)
             if not chunk:
                 break
@@ -255,17 +272,13 @@ def processar_streaming_direto(file, session, ip_hash):
                 
             linha_buffer += chunk_text
             
-            # Processa linhas completas em lote
-            lines_to_process = []
+            # Processa linhas e distribui entre shards
             while '\n' in linha_buffer:
                 linha, linha_buffer = linha_buffer.split('\n', 1)
                 linha_limpa = linha.strip()
                 
-                if linha_limpa and linha_valida(linha_limpa):
-                    lines_to_process.append(linha_limpa)
-            
-            # Processa lote de linhas
-            for linha_limpa in lines_to_process:
+                if not linha_limpa or not linha_valida(linha_limpa):
+                    continue
                 
                 try:
                     partes = linha_limpa.split(':')
@@ -275,63 +288,71 @@ def processar_streaming_direto(file, session, ip_hash):
                     else:
                         url, username, password = partes[0], partes[1], partes[2]
                     
-                    batch_data.append((url, username, password, linha_limpa))
+                    # Determina shard baseado no hash da linha
+                    linha_hash = hashlib.md5(linha_limpa.encode()).hexdigest()
+                    shard_num = int(linha_hash, 16) % 4
                     
-                    # Checa brasileiro
-                    if any(br in url.lower() for br in ['.br', '.com.br', 'uol.com', 'globo.com']):
-                        cursor_br.execute('INSERT INTO brazilian_urls (url, linha_completa) VALUES (?, ?)', (url, linha_limpa))
-                    
-                    # Domínio
-                    try:
-                        if url.startswith(('http://', 'https://')):
-                            domain = urlparse(url).netloc
-                        else:
-                            domain = url.split('/')[0]
-                        if domain:
-                            cursor_domains.execute('INSERT OR IGNORE INTO domains (domain) VALUES (?)', (domain,))
-                            cursor_domains.execute('UPDATE domains SET count = count + 1 WHERE domain = ?', (domain,))
-                    except:
-                        pass
-                        
-                    batch_count += 1
+                    shard_batches[shard_num].append((url, username, password, linha_limpa, file.filename, shard_num))
                     
                 except:
                     continue
             
-            # Insert batch a cada 500 linhas para arquivos grandes
-            if len(batch_data) >= 500:
-                cursor.executemany('INSERT INTO credentials (url, username, password, linha_completa) VALUES (?, ?, ?, ?)', batch_data)
-                total_valid += len(batch_data)
-                batch_data.clear()
+            # Processa lotes quando atingir tamanho para cada shard
+            total_items = sum(len(batch) for batch in shard_batches.values())
+            if total_items >= batch_size * 4:
                 
-                # Commit e progresso a cada 25000 linhas
-                if batch_count % 25000 == 0:
-                    for db in [conn, conn_domains, conn_br]:
-                        db.commit()
-                        db.execute('BEGIN TRANSACTION')
-                    print(f"   🚀 STREAM {progress:.1f}%: {total_valid:,} processadas, {bytes_processed/(1024*1024):.1f}MB lidos...")
+                for shard_num, batch_data in shard_batches.items():
+                    if batch_data:
+                        cursor = shard_connections[shard_num].cursor()
+                        cursor.executemany('''
+                        INSERT INTO credentials (url, username, password, linha_completa, file_source, shard_id)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ''', batch_data)
+                        shard_connections[shard_num].commit()
+                        shard_connections[shard_num].execute('BEGIN TRANSACTION')
+                        total_valid += len(batch_data)
+                
+                # Mostra progresso detalhado
+                if total_valid % 50000 == 0:
+                    print(f"   🚀 STREAM {progress:.1f}%: {total_valid:,} válidas, {bytes_processed/(1024*1024):.1f}MB processados")
+                
+                # Limpa batches
+                shard_batches = {0: [], 1: [], 2: [], 3: []}
             
-            # Libera chunks processados da memória
-            del chunk, chunk_text, lines_to_process
-            
-            # Libera chunk imediatamente
+            # Libera chunk da memória
             del chunk, chunk_text
         
-        # Insert final do batch restante
-        if batch_data:
-            cursor.executemany('INSERT INTO credentials (url, username, password, linha_completa) VALUES (?, ?, ?, ?)', batch_data)
-            total_valid += len(batch_data)
+        # Processa lotes finais
+        for shard_num, batch_data in shard_batches.items():
+            if batch_data:
+                cursor = shard_connections[shard_num].cursor()
+                cursor.executemany('''
+                INSERT INTO credentials (url, username, password, linha_completa, file_source, shard_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ''', batch_data)
+                shard_connections[shard_num].commit()
+                total_valid += len(batch_data)
         
-        # Commit final
-        for db in [conn, conn_domains, conn_br]:
-            db.commit()
-            db.close()
+        # Fecha conexões
+        for conn in shard_connections.values():
+            conn.close()
         
-        print(f"✅ STREAMING COMPLETO: {total_valid:,} linhas válidas processadas!")
+        print(f"✅ STREAMING 500MB+ COMPLETO: {total_valid:,} linhas nos 4 shards!")
+        
+        # Exibe distribuição final
+        for shard_num in range(4):
+            db_path = os.path.join(os.path.dirname(session['databases']['main']), f"upload_shard_{shard_num}.db")
+            conn_check = sqlite3.connect(db_path)
+            cursor_check = conn_check.cursor()
+            cursor_check.execute('SELECT COUNT(*) FROM credentials')
+            count = cursor_check.fetchone()[0]
+            conn_check.close()
+            print(f"   📊 Shard {shard_num}: {count:,} registros totais")
+        
         return total_valid
         
     except Exception as e:
-        print(f"✗ Erro no streaming: {str(e)[:100]}")
+        print(f"✗ Erro no streaming 500MB+: {str(e)[:100]}")
         return 0
 
 # ========== SISTEMA DE SHARDING SQLITE PARA UPLOADS GRANDES ==========
@@ -1200,7 +1221,15 @@ def extrair_arquivo_normal(file):
 def extrair_arquivo_grande(file):
     """Processamento em chunks para arquivos 50-500MB"""
     try:
+        file.seek(0, 2)
+        file_size = file.tell()
         file.seek(0)
+        file_size_mb = file_size / (1024 * 1024)
+        
+        # Para arquivos 500MB+, força streaming direto
+        if file_size_mb >= 500:
+            print(f"🚀 FORÇANDO STREAMING DIRETO: {file_size_mb:.1f}MB")
+            return "STREAMING_GIGANTE"
         
         # Lê em chunks de 10MB para não explodir a RAM
         chunk_size = 10 * 1024 * 1024  # 10MB chunks
