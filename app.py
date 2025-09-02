@@ -197,6 +197,7 @@ def get_user_session(ip):
             print(f"⚠️ Erro ao carregar stats: {e}")
             pass
     
+    return IP_SESSIONS[ip_hash]
 
 def processar_streaming_direto(file, session, ip_hash):
     """Processamento streaming direto para arquivos 1GB+ sem usar RAM"""
@@ -314,14 +315,152 @@ def processar_streaming_direto(file, session, ip_hash):
         print(f"✗ Erro no streaming: {str(e)[:100]}")
         return 0
 
+# ========== SISTEMA DE SHARDING SQLITE PARA UPLOADS GRANDES ==========
 
-    # Atualiza última atividade
-    IP_SESSIONS[ip_hash]['last_activity'] = datetime.now()
+def get_shard_connection(file_id: str, ip_hash: str, base_path=None):
+    """Cria conexão com shard SQLite baseado em hash para uploads grandes"""
+    if base_path is None:
+        base_path = os.path.join(tempfile.gettempdir(), f"user_{ip_hash}")
     
-    # Agenda limpeza automática (30 minutos de inatividade)
-    schedule_cleanup(ip_hash)
+    # 4 shards por IP para distribuir carga
+    shard_num = int(hashlib.md5(f"{ip_hash}_{file_id}".encode()).hexdigest(), 16) % 4
+    db_path = os.path.join(base_path, f"shard_{shard_num}.db")
     
-    return IP_SESSIONS[ip_hash]
+    # Cria diretório se não existir
+    os.makedirs(base_path, exist_ok=True)
+    
+    conn = sqlite3.connect(db_path)
+    
+    # PRAGMA otimizações para performance máxima
+    conn.execute("PRAGMA synchronous = OFF")
+    conn.execute("PRAGMA journal_mode = WAL") 
+    conn.execute("PRAGMA cache_size = 10000")
+    conn.execute("PRAGMA temp_store = MEMORY")
+    conn.execute("PRAGMA mmap_size = 268435456")  # 256MB
+    
+    # Cria tabela se não existir
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS credentials (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        url TEXT NOT NULL,
+        username TEXT NOT NULL,
+        password TEXT NOT NULL,
+        linha_completa TEXT NOT NULL,
+        file_source TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    
+    cursor.execute('''CREATE INDEX IF NOT EXISTS idx_url ON credentials(url)''')
+    cursor.execute('''CREATE INDEX IF NOT EXISTS idx_file_source ON credentials(file_source)''')
+    
+    conn.commit()
+    return conn, db_path
+
+def batch_insert_credentials_sharded(conn, data_batch, file_source, batch_size=2000):
+    """Inserção em lote otimizada para credenciais usando sharding"""
+    cursor = conn.cursor()
+    
+    # Inserção em lote usando executemany
+    inserted = 0
+    for i in range(0, len(data_batch), batch_size):
+        batch = data_batch[i:i + batch_size]
+        
+        # Prepara dados com file_source
+        batch_with_source = [(item[0], item[1], item[2], item[3], file_source) for item in batch]
+        
+        cursor.executemany('''
+        INSERT INTO credentials (url, username, password, linha_completa, file_source)
+        VALUES (?, ?, ?, ?, ?)
+        ''', batch_with_source)
+        
+        inserted += len(batch)
+        
+        # Commit periódico para evitar locks longos
+        if i % (batch_size * 5) == 0:
+            conn.commit()
+    
+    conn.commit()
+    return inserted
+
+def optimize_sqlite_for_large_uploads(conn):
+    """Aplica todas as otimizações PRAGMA para uploads massivos"""
+    optimizations = [
+        "PRAGMA synchronous = OFF",
+        "PRAGMA journal_mode = WAL",
+        "PRAGMA cache_size = 20000",  # 20MB cache
+        "PRAGMA temp_store = MEMORY",
+        "PRAGMA mmap_size = 536870912",  # 512MB
+        "PRAGMA page_size = 65536",  # 64KB pages
+        "PRAGMA auto_vacuum = 0",
+        "PRAGMA secure_delete = 0"
+    ]
+    
+    for pragma in optimizations:
+        try:
+            conn.execute(pragma)
+        except Exception as e:
+            print(f"⚠️ PRAGMA falhou: {pragma} - {e}")
+    
+    return conn
+
+def consolidate_shards(ip_hash, target_db_path):
+    """Consolida todos os shards em um banco central"""
+    shard_dir = os.path.join(tempfile.gettempdir(), f"user_{ip_hash}")
+    
+    # Cria banco consolidado
+    main_conn = sqlite3.connect(target_db_path)
+    optimize_sqlite_for_large_uploads(main_conn)
+    
+    cursor = main_conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS credentials (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        url TEXT NOT NULL,
+        username TEXT NOT NULL,
+        password TEXT NOT NULL,
+        linha_completa TEXT NOT NULL,
+        file_source TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    
+    total_consolidated = 0
+    
+    # Consolida cada shard
+    for shard_num in range(4):
+        shard_path = os.path.join(shard_dir, f"shard_{shard_num}.db")
+        if os.path.exists(shard_path):
+            try:
+                # Anexa shard temporariamente
+                cursor.execute(f"ATTACH DATABASE '{shard_path}' AS shard_{shard_num}")
+                
+                # Copia dados do shard
+                cursor.execute(f'''
+                INSERT INTO credentials (url, username, password, linha_completa, file_source, created_at)
+                SELECT url, username, password, linha_completa, file_source, created_at 
+                FROM shard_{shard_num}.credentials
+                ''')
+                
+                count = cursor.rowcount
+                total_consolidated += count
+                print(f"📦 Shard {shard_num}: {count:,} registros consolidados")
+                
+                # Desanexa shard
+                cursor.execute(f"DETACH DATABASE shard_{shard_num}")
+                
+                # Remove arquivo shard
+                os.remove(shard_path)
+                
+            except Exception as e:
+                print(f"⚠️ Erro ao consolidar shard {shard_num}: {e}")
+    
+    main_conn.commit()
+    main_conn.close()
+    
+    print(f"✅ Consolidação completa: {total_consolidated:,} registros no banco principal")
+    return total_consolidated
 
 def schedule_cleanup(ip_hash):
     """Agenda limpeza automática dos SQLites temporários por IP"""
@@ -1159,97 +1298,108 @@ def upload_file():
                             
                         print(f"➤ Validando {len(content):,} linhas de {file.filename}...")
                         
-                        # Processamento ultra-otimizado para RAM limitada
-                        batch_size = 1000  # Chunks menores para 1GB
+                        print(f"🚀 USANDO SHARDING OTIMIZADO para {file.filename} ({len(content):,} linhas)")
+                        
+                        # Processamento com sistema de sharding SQLite para performance máxima
+                        batch_size = 2000  # Batches maiores para melhor performance
                         total_valid = 0
                         
-                        # Conexões SQLite com configuração de alta performance
-                        conn = sqlite3.connect(session['databases']['main'])
+                        # Conexão com shard para este arquivo específico
+                        shard_conn, shard_path = get_shard_connection(file.filename, ip_hash)
+                        print(f"📦 Usando shard: {shard_path}")
+                        
+                        # Conexões auxiliares com otimizações PRAGMA
                         conn_domains = sqlite3.connect(session['databases']['domains'])
                         conn_br = sqlite3.connect(session['databases']['brazilian'])
                         
-                        # Configurações SQLite para arquivos gigantes
-                        for db_conn in [conn, conn_domains, conn_br]:
-                            db_conn.execute('PRAGMA journal_mode=OFF')  # Mais rápido para bulk
-                            db_conn.execute('PRAGMA synchronous=OFF')   # Máxima velocidade
-                            db_conn.execute('PRAGMA cache_size=50000')  # Cache grande
-                            db_conn.execute('PRAGMA temp_store=MEMORY')
-                            db_conn.execute('PRAGMA mmap_size=268435456')  # 256MB mmap
+                        # Aplica PRAGMA otimizações em todas as conexões
+                        for db_conn in [shard_conn, conn_domains, conn_br]:
+                            optimize_sqlite_for_large_uploads(db_conn)
                         
-                        cursor = conn.cursor()
-                        cursor_domains = conn_domains.cursor()
-                        cursor_br = conn_br.cursor()
+                        # Processa em lotes otimizados
+                        batch_data = []
+                        domains_set = set()
+                        br_data = []
                         
-                        # Processa em micro-batches para não estourar RAM
-                        for i in range(0, len(content), batch_size):
-                            batch = content[i:i + batch_size]
-                            batch_data = []
-                            domains_set = set()
-                            br_data = []
+                        for i, linha in enumerate(content):
+                            linha_limpa = linha.strip()
+                            if not linha_limpa or not linha_valida(linha_limpa):
+                                continue
                             
-                            # Validação e preparação otimizada
-                            for linha in batch:
-                                linha_limpa = linha.strip()
-                                if not linha_limpa or not linha_valida(linha_limpa):
-                                    continue
-                                
-                                try:
-                                    partes = linha_limpa.split(':')
-                                    if linha_limpa.startswith(('https://', 'http://')):
-                                        url = ':'.join(partes[:-2])
-                                        username, password = partes[-2], partes[-1]
-                                    else:
-                                        url, username, password = partes[0], partes[1], partes[2]
+                            try:
+                                partes = linha_limpa.split(':')
+                                if linha_limpa.startswith(('https://', 'http://')):
+                                    url = ':'.join(partes[:-2])
+                                    username, password = partes[-2], partes[-1]
+                                else:
+                                    url, username, password = partes[0], partes[1], partes[2]
 
-                                    batch_data.append((url, username, password, linha_limpa))
-                                    
-                                    # Checa se é brasileiro
-                                    if any(br in url.lower() for br in ['.br', '.com.br', 'uol.com', 'globo.com', 'brasil']):
-                                        br_data.append((url, linha_limpa))
-                                    
-                                    # Extrai domínio
-                                    try:
-                                        if url.startswith(('http://', 'https://')):
-                                            domain = urlparse(url).netloc
-                                        else:
-                                            domain = url.split('/')[0]
-                                        if domain:
-                                            domains_set.add(domain)
-                                    except:
-                                        pass
+                                batch_data.append((url, username, password, linha_limpa))
+                                
+                                # Checa se é brasileiro
+                                if any(br in url.lower() for br in ['.br', '.com.br', 'uol.com', 'globo.com', 'brasil']):
+                                    br_data.append((url, linha_limpa))
+                                
+                                # Extrai domínio
+                                try:
+                                    if url.startswith(('http://', 'https://')):
+                                        domain = urlparse(url).netloc
+                                    else:
+                                        domain = url.split('/')[0]
+                                    if domain:
+                                        domains_set.add(domain)
                                 except:
-                                    continue
+                                    pass
+                            except:
+                                continue
                             
-                            # Inserts em lote ultra-rápidos
-                            if batch_data:
-                                cursor.executemany('INSERT INTO credentials (url, username, password, linha_completa) VALUES (?, ?, ?, ?)', batch_data)
+                            # Insere em lotes usando sharding otimizado
+                            if len(batch_data) >= batch_size:
+                                # Usa função de batch insert otimizada
+                                inserted = batch_insert_credentials_sharded(shard_conn, batch_data, file.filename)
+                                total_valid += inserted
+                                
+                                # Insere dados auxiliares
+                                if br_data:
+                                    cursor_br = conn_br.cursor()
+                                    cursor_br.executemany('INSERT INTO brazilian_urls (url, linha_completa) VALUES (?, ?)', br_data)
+                                    conn_br.commit()
+                                
+                                cursor_domains = conn_domains.cursor()
+                                for domain in domains_set:
+                                    cursor_domains.execute('INSERT OR IGNORE INTO domains (domain) VALUES (?)', (domain,))
+                                    cursor_domains.execute('UPDATE domains SET count = count + 1 WHERE domain = ?', (domain,))
+                                conn_domains.commit()
+                                
+                                print(f"   📦 Shard processado: {len(batch_data):,} registros ({total_valid:,} total)")
+                                
+                                # Limpa lotes para próxima iteração
+                                batch_data, br_data, domains_set = [], [], set()
+                        
+                        # Processa lote final
+                        if batch_data:
+                            inserted = batch_insert_credentials_sharded(shard_conn, batch_data, file.filename)
+                            total_valid += inserted
                             
                             if br_data:
+                                cursor_br = conn_br.cursor()
                                 cursor_br.executemany('INSERT INTO brazilian_urls (url, linha_completa) VALUES (?, ?)', br_data)
+                                conn_br.commit()
                             
+                            cursor_domains = conn_domains.cursor()
                             for domain in domains_set:
                                 cursor_domains.execute('INSERT OR IGNORE INTO domains (domain) VALUES (?)', (domain,))
                                 cursor_domains.execute('UPDATE domains SET count = count + 1 WHERE domain = ?', (domain,))
-                            
-                            total_valid += len(batch_data)
-                            
-                            # Commit mais frequente para arquivos grandes
-                            if i % (batch_size * 5) == 0:  # A cada 5k linhas
-                                conn.commit()
-                                conn_domains.commit()
-                                conn_br.commit()
-                                print(f"   💾 Salvo: {i + len(batch):,}/{len(content):,} ({total_valid:,} válidas)")
-                            
-                            # Limpa memória imediatamente
-                            del batch_data, domains_set, br_data, batch
+                            conn_domains.commit()
                         
-                        # Commit final
-                        conn.commit()
-                        conn_domains.commit()
-                        conn_br.commit()
-                        conn.close()
+                        # Fecha conexões
+                        shard_conn.close()
                         conn_domains.close()
                         conn_br.close()
+                        
+                        # Consolida shards no banco principal após processamento
+                        print(f"🔄 Consolidando shards no banco principal...")
+                        consolidate_shards(ip_hash, session['databases']['main'])
                         
                         # Libera content da memória
                         del content
@@ -1350,6 +1500,9 @@ def upload_file():
             return "Erro interno no servidor", 500
 
     # Renderiza página principal com estatísticas do IP real
+    # Garante que session não seja None
+    if not session or 'stats' not in session:
+        session = get_user_session(user_ip)
     stats = session['stats']
     page_content = html_form.replace('USER_REAL_IP', user_ip)
     page_content = page_content.replace('USER_IP_HASH', ip_hash)
