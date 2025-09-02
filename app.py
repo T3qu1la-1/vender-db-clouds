@@ -462,13 +462,13 @@ def extrair_arquivo_comprimido(file):
 def filtrar_urls_brasileiras(linhas):
     """Filtra URLs brasileiras usando detecção avançada"""
     urls_brasileiras = []
-    
+
     # Domínios brasileiros conhecidos
     dominios_br = [
         '.br', '.com.br', '.org.br', '.net.br', '.gov.br', '.edu.br',
         '.mil.br', '.art.br', '.rec.br', '.esp.br', '.etc.br'
     ]
-    
+
     # Sites/empresas brasileiros populares (sem .br)
     sites_brasileiros = [
         'uol.com', 'globo.com', 'terra.com.br', 'ig.com.br', 'bol.com.br',
@@ -490,7 +490,7 @@ def filtrar_urls_brasileiras(linhas):
         'cpf.receita.fazenda.gov.br', 'detran', 'tse.jus.br',
         'inss.gov.br', 'gov.br', 'receita.fazenda.gov.br'
     ]
-    
+
     # Palavras-chave brasileiras em URLs/domínios
     palavras_br = [
         'brasil', 'brazil', 'br_', '_br', 'saopaulo', 'riodejaneiro',
@@ -514,30 +514,59 @@ def filtrar_urls_brasileiras(linhas):
         'tj', 'mp', 'oab', 'crea', 'crc', 'crm'
     ]
 
+    # Códigos DDD brasileiros comuns em URLs (para identificar contatos locais)
+    ddd_brasileiros = [
+        '011', '012', '013', '014', '015', '016', '017', '018', '019',
+        '021', '022', '024', '027', '028',
+        '031', '032', '033', '034', '035', '037', '038',
+        '041', '042', '043', '044', '045', '046',
+        '047', '048', '049',
+        '051', '053', '054', '055',
+        '061', '062', '064',
+        '065', '066',
+        '067',
+        '068',
+        '069',
+        '071', '073', '074', '075', '077',
+        '079',
+        '081', '087',
+        '082',
+        '083',
+        '084',
+        '085', '088',
+        '086',
+        '089',
+        '091', '093', '094',
+        '092', '097',
+        '095',
+        '096',
+        '098', '099'
+    ]
+
     for linha in linhas:
-        linha_limpa = linha.strip().lower()
+        linha_limpa = linha.strip()
         url_parte = linha_limpa.split(':')[0] if ':' in linha_limpa else linha_limpa
-        
+
         eh_brasileiro = False
-        
+
         # 1. Verifica domínios .br
-        if any(dominio in linha_limpa for dominio in dominios_br):
+        if any(dominio in url_parte for dominio in dominios_br):
             eh_brasileiro = True
-            
+
         # 2. Verifica sites brasileiros conhecidos
-        elif any(site in linha_limpa for site in sites_brasileiros):
+        elif any(site in url_parte for site in sites_brasileiros):
             eh_brasileiro = True
-            
+
         # 3. Verifica palavras-chave brasileiras
-        elif any(palavra in linha_limpa for palavra in palavras_br):
+        elif any(palavra in url_parte for palavra in palavras_br):
             eh_brasileiro = True
-            
+
         # 4. Verifica nomes de empresas brasileiras
-        elif any(empresa in linha_limpa for empresa in empresas_br):
+        elif any(empresa in url_parte for empresa in empresas_br):
             eh_brasileiro = True
-            
+
         # 5. Padrões específicos brasileiros
-        elif any(padrao in linha_limpa for padrao in [
+        elif any(padrao in url_parte for padrao in [
             'cpf', 'cnpj', 'rg', 'cep', 'pix', 'boleto',
             'cartorio', 'tabeliao', 'delegacia', 'prefeitura',
             'camara', 'assembleia', 'senado', 'congresso',
@@ -545,39 +574,13 @@ def filtrar_urls_brasileiras(linhas):
             'cvm', 'bacen', 'banco_central', 'susep'
         ]):
             eh_brasileiro = True
-            
-        # 6. Códigos DDD brasileiros na URL (padrão comum)
-        elif any(ddd in linha_limpa for ddd in [
-            '011', '012', '013', '014', '015', '016', '017', '018', '019',
-            '021', '022', '024', '027', '028',
-            '031', '032', '033', '034', '035', '037', '038',
-            '041', '042', '043', '044', '045', '046',
-            '047', '048', '049',
-            '051', '053', '054', '055',
-            '061', '062', '064',
-            '065', '066',
-            '067',
-            '068',
-            '069',
-            '071', '073', '074', '075', '077',
-            '079',
-            '081', '087',
-            '082',
-            '083',
-            '084',
-            '085', '088',
-            '086',
-            '089',
-            '091', '093', '094',
-            '092', '097',
-            '095',
-            '096',
-            '098', '099'
-        ]):
+
+        # 6. Códigos DDD brasileiros na URL
+        elif any(ddd in url_parte for ddd in ddd_brasileiros):
             eh_brasileiro = True
 
         if eh_brasileiro:
-            urls_brasileiras.append(linha.strip())  # Mantém formatação original
+            urls_brasileiras.append(linha_limpa)  # Adiciona a linha limpa
 
     return urls_brasileiras
 
@@ -1331,7 +1334,10 @@ def filter_br():
     try:
         with open(arquivo_temp, 'w', encoding='utf-8') as f:
             for url in urls_br:
-                f.write(f"{url}\\n")
+                # Remove caracteres de escape e formata corretamente
+                url_limpa = url.replace('\n', '').replace('\r', '').strip()
+                if url_limpa:
+                    f.write(f"{url_limpa}\n")
 
         return render_template_string(f"""
         <!doctype html>
@@ -1413,7 +1419,7 @@ def download_filtered(filename):
             import threading
             timer = threading.Timer(30.0, cleanup_file)  # Remove após 30 segundos
             timer.start()
-            
+
             return send_file(file_path, as_attachment=True, download_name=f"{filename}.txt")
         else:
             return "Arquivo não encontrado", 404
@@ -1575,7 +1581,7 @@ def db_preview():
                         app.logger.info(f"Arquivo DB temporário (preview) removido: {os.path.basename(temp_db_path)}")
                 except Exception as cleanup_error:
                     app.logger.error(f"Erro ao limpar arquivo DB temporário (preview): {cleanup_error}")
-            
+
             import threading
             timer = threading.Timer(60.0, cleanup_file) # Limpa após 60 segundos
             timer.daemon = True
