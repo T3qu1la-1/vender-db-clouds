@@ -1363,7 +1363,7 @@ def linha_valida(linha):
     return False
 
 def detectar_url_brasileira(url):
-    """Detecta se uma URL é brasileira com padrões expandidos"""
+    """Detecta se uma URL é brasileira com padrões expandidos incluindo .com/.net brasileiros"""
     url_lower = url.lower()
     
     # Padrões brasileiros expandidos
@@ -1377,33 +1377,89 @@ def detectar_url_brasileira(url):
         '.srv.br', '.tmp.br', '.trd.br', '.tur.br', '.tv.br', '.vet.br',
         '.vlog.br', '.wiki.br', '.zlg.br',
         
-        # Sites brasileiros conhecidos
-        'uol.com', 'globo.com', 'terra.com.br', 'ig.com.br', 'folha.uol.com.br',
-        'estadao.com.br', 'veja.abril.com.br', 'band.uol.com.br', 'r7.com',
-        'g1.globo.com', 'mercadolivre.com.br', 'americanas.com.br', 'submarino.com.br',
-        'magazine.luiza', 'casasbahia.com.br', 'pontofrio.com.br',
+        # Sites brasileiros conhecidos (.com/.net/.org brasileiros)
+        'uol.com', 'globo.com', 'terra.com', 'ig.com', 'abril.com',
+        'folha.com', 'estadao.com', 'band.com', 'r7.com', 'sbt.com',
+        'record.com', 'jovempan.com', 'cbn.com', 'extra.com',
+        'oglobo.com', 'valor.com', 'exame.com', 'istoedinheiro.com',
+        'caras.com', 'contigo.com', 'capricho.com', 'superinteressante.com',
+        'mundoestranho.com', 'recreio.com', 'placar.com', 'quatro.com',
         
-        # Bancos brasileiros
-        'itau.com.br', 'bradesco.com.br', 'bancodobrasil.com.br', 'caixa.gov.br',
-        'santander.com.br', 'nubank.com.br', 'inter.co', 'original.com.br',
-        'safra.com.br', 'btgpactual.com', 'sicoob.com.br', 'sicredi.com.br',
+        # E-commerce brasileiro (.com/.net)
+        'mercadolivre.com', 'americanas.com', 'submarino.com', 'shoptime.com',
+        'magazineluiza.com', 'casasbahia.com', 'pontofrio.com', 'extra.com',
+        'walmart.com', 'carrefour.com', 'lojas.com', 'saraiva.com',
+        'livrariacultura.com', 'fnac.com', 'centauro.com', 'netshoes.com',
+        'dafiti.com', 'zattini.com', 'kanui.com', 'tricae.com',
+        'enjoei.com', 'elo7.com', 'olx.com', 'webmotors.com',
+        'icarros.com', 'seminovos.com', 'mercadocar.com',
         
-        # Órgãos governamentais
-        'gov.br', 'receita.fazenda.gov.br', 'detran', 'tse.jus.br', 'trf',
-        'tjsp.jus.br', 'tjrj.jus.br', 'tjmg.jus.br', 'tjrs.jus.br',
-        'correios.com.br', 'cep.correios.com.br',
+        # Bancos e fintechs brasileiros (.com)
+        'itau.com', 'bradesco.com', 'santander.com', 'nubank.com',
+        'inter.com', 'original.com', 'safra.com', 'btgpactual.com',
+        'sicoob.com', 'sicredi.com', 'c6bank.com', 'modalmais.com',
+        'xpi.com', 'rico.com', 'easynvest.com', 'clear.com',
+        'avenue.com', 'toro.com', 'picpay.com', 'pagseguro.com',
+        'mercadopago.com', 'stone.com', 'cielo.com', 'getnet.com',
         
-        # Telecomunicações
-        'vivo.com.br', 'tim.com.br', 'claro.com.br', 'oi.com.br',
-        'net.com.br', 'sky.com.br', 'nextel.com.br',
+        # Telecomunicações (.com/.net)
+        'vivo.com', 'tim.com', 'claro.com', 'oi.com', 'nextel.com',
+        'net.com', 'sky.com', 'algar.com', 'copel.com', 'unifique.com',
         
-        # Educação
-        'usp.br', 'unicamp.br', 'ufrj.br', 'ufmg.br', 'ufrs.br', 'unb.br',
-        'puc-rio.br', 'mackenzie.br', 'fgv.br', 'capes.gov.br', 'cnpq.br',
+        # Tecnologia brasileira (.com/.net)
+        'uol.com', 'terra.com', 'locaweb.com', 'hostgator.com',
+        'kinghost.com', 'umbler.com', 'hostnet.com', 'redehost.com',
+        'totvs.com', 'softplan.com', 'linx.com', 'senior.com',
+        'datasul.com', 'microsiga.com', 'bematech.com',
         
-        # Palavras relacionadas ao Brasil
-        'brasil', 'brazil', 'brasileiro', 'brasilia', 'saopaulo', 'riodejaneiro',
-        'minasgerais', 'bahia', 'parana', 'goias', 'ceara', 'pernambuco'
+        # Delivery e apps brasileiros (.com)
+        'ifood.com', 'rappi.com', 'uber.com', '99app.com', 'cabify.com',
+        'loggi.com', 'correios.com', 'jadlog.com', 'totalexpress.com',
+        
+        # Educação brasileira (.com/.net/.org)
+        'univesp.com', 'unopar.com', 'anhanguera.com', 'estacio.com',
+        'unip.com', 'uninove.com', 'cruzeirodosul.com', 'unicsul.com',
+        'faculdadeimpacta.com', 'fiap.com', 'insper.com', 'fmu.com',
+        'anhembi.com', 'belas.com', 'metodista.com', 'mackenzie.com',
+        
+        # Portais de notícias brasileiros (.com/.net)
+        'folha.com', 'estadao.com', 'oglobo.com', 'valor.com',
+        'band.com', 'r7.com', 'sbt.com', 'record.com', 'cnn.com',
+        'metrópoles.com', 'poder360.com', 'congresso.com', 'senado.com',
+        
+        # Games e entretenimento brasileiro (.com/.net)
+        'levelup.com', 'jogos.com', 'techtudo.com', 'tecmundo.com',
+        'olhardigital.com', 'canaltech.com', 'showmetech.com',
+        
+        # Varejo e serviços brasileiros (.com/.net)
+        'riachuelo.com', 'renner.com', 'cea.com', 'marisa.com',
+        'lojasdeararas.com', 'pompeia.com', 'havan.com', 'madeiramadeira.com',
+        'mobly.com', 'tok.com', 'westwing.com', 'leroy.com',
+        'telhanorte.com', 'construtoramz.com', 'habitissimo.com',
+        
+        # Órgãos governamentais (.gov que podem ter .com também)
+        'receita.com', 'detran.com', 'tse.com', 'trf.com', 'tj.com',
+        'correios.com', 'cep.com', 'cpf.com', 'cnpj.com',
+        
+        # Padrões de palavras brasileiras em qualquer domínio
+        'brasil', 'brazil', 'brasileiro', 'brasileira', 'brasilia',
+        'saopaulo', 'riodejaneiro', 'minasgerais', 'bahia', 'parana',
+        'goias', 'ceara', 'pernambuco', 'riograndedosul', 'santa',
+        'espiritosanto', 'matogrosso', 'rondonia', 'acre', 'amazonas',
+        'roraima', 'amapa', 'tocantins', 'maranhao', 'piaui',
+        'riograndedonorte', 'paraiba', 'alagoas', 'sergipe',
+        
+        # Cidades brasileiras famosas
+        'fortaleza', 'recife', 'salvador', 'curitiba', 'manaus',
+        'belém', 'goiania', 'campinas', 'sorocaba', 'santos',
+        'osasco', 'ribeirao', 'uberlandia', 'contagem', 'aracaju',
+        'cuiaba', 'joaopessoa', 'teresina', 'natal', 'campo',
+        'saojoao', 'santoandre', 'saobernardo', 'guarulhos',
+        'duquedecaxias', 'novahambur', 'canoas', 'pelotas',
+        
+        # Expressões tipicamente brasileiras
+        'ltda', 'eireli', 'mei', 'cpf', 'cnpj', 'cep', 'pix',
+        'cartaobndes', 'sebrae', 'senai', 'sesi', 'senac', 'sesc'
     ]
     
     return any(pattern in url_lower for pattern in br_patterns)
