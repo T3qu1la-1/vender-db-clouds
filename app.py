@@ -1,3 +1,4 @@
+
 from flask import Flask, request, render_template_string, send_file
 import os
 import logging
@@ -6,35 +7,209 @@ import tempfile
 import zipfile
 import io
 import re
+import threading
+import time
+import hashlib
 from urllib.parse import urlparse
+from datetime import datetime, timedelta
 
-# Logging simplificado - apenas mensagens essenciais
+# Logging simplificado
 logging.basicConfig(level=logging.ERROR, format='%(message)s')
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret-key-change-in-production")
 
-# Sistema otimizado de processamento em memória
-session_data = {
-    'all_lines': [],
-    'nome_arquivo_final': "resultado_final",
-    'stats': {
-        'total_lines': 0,
-        'valid_lines': 0,
-        'brazilian_urls': 0,
-        'domains': set()
-    }
-}
+# Sistema de sessões por IP com SQLite
+IP_SESSIONS = {}
+CLEANUP_TIMERS = {}
 
-# HTML da interface reorganizada e otimizada
+def get_user_ip():
+    """Obtém IP do usuário de forma segura"""
+    forwarded_ip = request.headers.get('X-Forwarded-For')
+    if forwarded_ip:
+        return forwarded_ip.split(',')[0].strip()
+    return request.environ.get('REMOTE_ADDR', 'unknown')
+
+def get_ip_hash(ip):
+    """Gera hash único para o IP"""
+    return hashlib.md5(ip.encode()).hexdigest()[:8]
+
+def create_ip_databases(ip_hash):
+    """Cria bancos SQLite específicos para o IP"""
+    db_dir = os.path.join(tempfile.gettempdir(), f"user_{ip_hash}")
+    os.makedirs(db_dir, exist_ok=True)
+    
+    databases = {
+        'main': os.path.join(db_dir, 'main.db'),
+        'stats': os.path.join(db_dir, 'stats.db'),
+        'brazilian': os.path.join(db_dir, 'brazilian.db'),
+        'domains': os.path.join(db_dir, 'domains.db')
+    }
+    
+    # Cria tabela principal
+    conn = sqlite3.connect(databases['main'])
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS credentials (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        url TEXT NOT NULL,
+        username TEXT NOT NULL,
+        password TEXT NOT NULL,
+        linha_completa TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    conn.commit()
+    conn.close()
+    
+    # Cria tabela de estatísticas
+    conn = sqlite3.connect(databases['stats'])
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS stats (
+        id INTEGER PRIMARY KEY,
+        total_lines INTEGER DEFAULT 0,
+        valid_lines INTEGER DEFAULT 0,
+        brazilian_urls INTEGER DEFAULT 0,
+        unique_domains INTEGER DEFAULT 0,
+        last_update TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    # Insere registro inicial zerado
+    cursor.execute('INSERT OR REPLACE INTO stats (id, total_lines, valid_lines, brazilian_urls, unique_domains) VALUES (1, 0, 0, 0, 0)')
+    conn.commit()
+    conn.close()
+    
+    # Cria tabela de URLs brasileiras
+    conn = sqlite3.connect(databases['brazilian'])
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS brazilian_urls (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        url TEXT NOT NULL,
+        linha_completa TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    conn.commit()
+    conn.close()
+    
+    # Cria tabela de domínios
+    conn = sqlite3.connect(databases['domains'])
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS domains (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        domain TEXT UNIQUE NOT NULL,
+        count INTEGER DEFAULT 1,
+        first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    conn.commit()
+    conn.close()
+    
+    return databases
+
+def get_user_session(ip):
+    """Obtém ou cria sessão do usuário por IP"""
+    ip_hash = get_ip_hash(ip)
+    
+    if ip_hash not in IP_SESSIONS:
+        databases = create_ip_databases(ip_hash)
+        IP_SESSIONS[ip_hash] = {
+            'databases': databases,
+            'last_activity': datetime.now(),
+            'stats': {'total_lines': 0, 'valid_lines': 0, 'brazilian_urls': 0, 'domains': 0}
+        }
+        
+        # Carrega estatísticas do banco
+        try:
+            conn = sqlite3.connect(databases['stats'])
+            cursor = conn.cursor()
+            cursor.execute('SELECT total_lines, valid_lines, brazilian_urls, unique_domains FROM stats WHERE id = 1')
+            result = cursor.fetchone()
+            if result:
+                IP_SESSIONS[ip_hash]['stats'] = {
+                    'total_lines': result[0],
+                    'valid_lines': result[1], 
+                    'brazilian_urls': result[2],
+                    'domains': result[3]
+                }
+            conn.close()
+        except:
+            pass
+    
+    # Atualiza última atividade
+    IP_SESSIONS[ip_hash]['last_activity'] = datetime.now()
+    
+    # Agenda limpeza automática (30 minutos de inatividade)
+    schedule_cleanup(ip_hash)
+    
+    return IP_SESSIONS[ip_hash]
+
+def schedule_cleanup(ip_hash):
+    """Agenda limpeza automática dos dados do IP"""
+    # Cancela timer anterior se existir
+    if ip_hash in CLEANUP_TIMERS:
+        CLEANUP_TIMERS[ip_hash].cancel()
+    
+    def cleanup_ip_data():
+        try:
+            if ip_hash in IP_SESSIONS:
+                # Remove todos os bancos SQLite do IP
+                db_dir = os.path.dirname(IP_SESSIONS[ip_hash]['databases']['main'])
+                if os.path.exists(db_dir):
+                    import shutil
+                    shutil.rmtree(db_dir)
+                    print(f"✓ Limpeza automática: dados do IP {ip_hash} removidos")
+                
+                # Remove da memória
+                del IP_SESSIONS[ip_hash]
+                if ip_hash in CLEANUP_TIMERS:
+                    del CLEANUP_TIMERS[ip_hash]
+        except Exception as e:
+            print(f"✗ Erro na limpeza do IP {ip_hash}: {e}")
+    
+    # Timer de 30 minutos (1800 segundos)
+    timer = threading.Timer(1800.0, cleanup_ip_data)
+    timer.daemon = True
+    timer.start()
+    CLEANUP_TIMERS[ip_hash] = timer
+
+def update_stats(ip_hash, new_lines_count):
+    """Atualiza estatísticas no banco SQLite"""
+    if ip_hash not in IP_SESSIONS:
+        return
+    
+    session = IP_SESSIONS[ip_hash]
+    session['stats']['total_lines'] += new_lines_count
+    session['stats']['valid_lines'] += new_lines_count
+    
+    # Atualiza no banco
+    try:
+        conn = sqlite3.connect(session['databases']['stats'])
+        cursor = conn.cursor()
+        cursor.execute('''
+        UPDATE stats SET 
+            total_lines = ?, 
+            valid_lines = ?, 
+            last_update = CURRENT_TIMESTAMP 
+        WHERE id = 1
+        ''', (session['stats']['total_lines'], session['stats']['valid_lines']))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"✗ Erro ao atualizar stats: {e}")
+
+# HTML da interface com estatísticas zeradas por padrão
 html_form = """
 <!doctype html>
 <html lang="pt-BR" data-bs-theme="dark">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>🚀 Central TXT Pro - Sistema Organizado</title>
+    <title>🚀 Central TXT Pro - Sistema por IP</title>
     <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -133,6 +308,22 @@ html_form = """
             color: #fff;
             margin-bottom: 0.5rem;
             text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        
+        .ip-info {
+            background: rgba(138, 43, 226, 0.1);
+            padding: 1rem;
+            border-radius: 10px;
+            margin-bottom: 2rem;
+            border: 1px solid rgba(138, 43, 226, 0.3);
+        }
+        
+        .auto-cleanup-info {
+            background: rgba(255, 193, 7, 0.1);
+            padding: 1rem;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 193, 7, 0.3);
+            margin-bottom: 2rem;
         }
         
         .menu-grid {
@@ -273,28 +464,51 @@ html_form = """
         <div class="container">
             <h1 class="text-white mb-2">
                 <i class="fas fa-rocket me-3"></i>
-                Central TXT Pro - Sistema Organizado
+                Central TXT Pro - Sistema Multi-SQLite
             </h1>
-            <p class="text-white-50 mb-0">Processamento Inteligente de Credenciais</p>
+            <p class="text-white-50 mb-0">Sistema organizado por IP com auto-limpeza</p>
         </div>
     </div>
 
     <div class="container">
+        <div class="ip-info">
+            <div class="d-flex align-items-center justify-content-between">
+                <div>
+                    <i class="fas fa-user-circle me-2"></i>
+                    <strong>Sua Sessão:</strong> <code>""" + """USER_IP_HASH</code>
+                </div>
+                <div>
+                    <i class="fas fa-database me-2"></i>
+                    <span class="badge bg-success">4 SQLites Ativos</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="auto-cleanup-info">
+            <div class="d-flex align-items-center">
+                <i class="fas fa-clock me-3 text-warning"></i>
+                <div>
+                    <strong>Auto-Limpeza:</strong> Seus dados serão automaticamente excluídos após 30 minutos de inatividade
+                    <br><small class="text-muted">Todos os SQLites, arquivos e estatísticas serão removidos quando você sair</small>
+                </div>
+            </div>
+        </div>
+
         <div class="dashboard-stats">
             <div class="stat-card">
-                <div class="stat-number">""" + f"{len(session_data['all_lines']):,}" + """</div>
+                <div class="stat-number">USER_TOTAL_LINES</div>
                 <div style="color: #b0b0b0; font-size: 0.9rem;"><i class="fas fa-chart-line me-2"></i>LINHAS PROCESSADAS</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number">""" + f"{session_data['stats'].get('valid_lines', 0):,}" + """</div>
+                <div class="stat-number">USER_VALID_LINES</div>
                 <div style="color: #b0b0b0; font-size: 0.9rem;"><i class="fas fa-check-circle me-2"></i>LINHAS VÁLIDAS</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number">""" + f"{session_data['stats'].get('brazilian_urls', 0):,}" + """</div>
+                <div class="stat-number">USER_BRAZILIAN_URLS</div>
                 <div style="color: #b0b0b0; font-size: 0.9rem;"><i class="fas fa-flag me-2"></i>URLs BRASILEIRAS</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number">""" + f"{len(session_data['stats'].get('domains', set())):,}" + """</div>
+                <div class="stat-number">USER_DOMAINS</div>
                 <div style="color: #b0b0b0; font-size: 0.9rem;"><i class="fas fa-globe me-2"></i>DOMÍNIOS ÚNICOS</div>
             </div>
         </div>
@@ -313,16 +527,6 @@ html_form = """
             <li class="nav-item">
                 <button class="nav-link" id="downloads-tab" data-bs-toggle="tab" data-bs-target="#downloads" type="button">
                     <i class="fas fa-download me-2"></i>Downloads
-                </button>
-            </li>
-            <li class="nav-item">
-                <button class="nav-link" id="conversion-tab" data-bs-toggle="tab" data-bs-target="#conversion" type="button">
-                    <i class="fas fa-exchange-alt me-2"></i>Conversão
-                </button>
-            </li>
-            <li class="nav-item">
-                <button class="nav-link" id="visualization-tab" data-bs-toggle="tab" data-bs-target="#visualization" type="button">
-                    <i class="fas fa-eye me-2"></i>Visualização
                 </button>
             </li>
             <li class="nav-item">
@@ -350,22 +554,10 @@ html_form = """
                         <p class="text-muted">Download completo e filtros especializados</p>
                     </div>
                     
-                    <div class="menu-item" onclick="switchTab('conversion')">
-                        <div class="menu-icon"><i class="fas fa-exchange-alt"></i></div>
-                        <h4 class="text-white">Conversão</h4>
-                        <p class="text-muted">Conversão para diferentes formatos de dados</p>
-                    </div>
-                    
-                    <div class="menu-item" onclick="switchTab('visualization')">
-                        <div class="menu-icon"><i class="fas fa-eye"></i></div>
-                        <h4 class="text-white">Visualização</h4>
-                        <p class="text-muted">Preview e análise detalhada dos dados</p>
-                    </div>
-                    
                     <div class="menu-item" onclick="switchTab('settings')">
                         <div class="menu-icon"><i class="fas fa-cog"></i></div>
                         <h4 class="text-white">Configurações</h4>
-                        <p class="text-muted">Limpeza de dados e configurações do sistema</p>
+                        <p class="text-muted">Gerenciamento de dados e SQLites</p>
                     </div>
                 </div>
             </div>
@@ -374,7 +566,7 @@ html_form = """
             <div class="tab-pane fade" id="processing">
                 <div class="system-card">
                     <div style="background: var(--primary); border-radius: 20px 20px 0 0; padding: 1.5rem; text-align: center;">
-                        <h3 class="text-white mb-0"><i class="fas fa-upload me-3"></i>Sistema de Processamento</h3>
+                        <h3 class="text-white mb-0"><i class="fas fa-upload me-3"></i>Sistema de Processamento Multi-SQLite</h3>
                     </div>
                     <div style="padding: 2rem;">
                         <div class="alert alert-info border-0 mb-4" style="background: rgba(102, 126, 234, 0.2); border-radius: 15px;">
@@ -469,7 +661,7 @@ html_form = """
                                     <a href="/download" class="btn btn-system btn-download btn-lg w-100 py-3">
                                         <i class="fas fa-download me-2"></i>💾 Download Completo
                                     </a>
-                                    <small class="text-muted d-block mt-2">Todas as linhas processadas</small>
+                                    <small class="text-muted d-block mt-2">Todas as linhas do SQLite principal</small>
                                 </div>
                             </div>
                             <div class="col-md-6">
@@ -477,83 +669,23 @@ html_form = """
                                     <a href="/filter-br" class="btn btn-system btn-filter btn-lg w-100 py-3">
                                         <i class="fas fa-flag me-2"></i>🇧🇷 Filtrar URLs .BR
                                     </a>
-                                    <small class="text-muted d-block mt-2">Apenas sites brasileiros</small>
+                                    <small class="text-muted d-block mt-2">Do SQLite brasileiro</small>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Conversão -->
-            <div class="tab-pane fade" id="conversion">
-                <div class="system-card">
-                    <div style="background: var(--info); border-radius: 20px 20px 0 0; padding: 1.5rem; text-align: center;">
-                        <h3 class="text-dark mb-0"><i class="fas fa-exchange-alt me-3"></i>Sistema de Conversão</h3>
-                    </div>
-                    <div style="padding: 2rem;">
-                        <div class="row g-3">
                             <div class="col-md-6">
                                 <div class="text-center">
-                                    <a href="/txt-to-db" class="btn btn-system btn-convert btn-lg w-100 py-3">
-                                        <i class="fas fa-database me-2"></i>🗄️ Converter para DB
+                                    <a href="/download-all-dbs" class="btn btn-system btn-convert btn-lg w-100 py-3">
+                                        <i class="fas fa-database me-2"></i>📦 Pack Completo SQLites
                                     </a>
-                                    <small class="text-muted d-block mt-2">Banco SQLite estruturado</small>
+                                    <small class="text-muted d-block mt-2">Todos os 4 bancos em ZIP</small>
                                 </div>
                             </div>
                             <div class="col-md-6">
                                 <div class="text-center">
-                                    <button class="btn btn-system btn-convert btn-lg w-100 py-3" onclick="alert('Em desenvolvimento')">
-                                        <i class="fas fa-file-csv me-2"></i>📊 Converter para CSV
-                                    </button>
-                                    <small class="text-muted d-block mt-2">Planilha Excel compatível</small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Visualização -->
-            <div class="tab-pane fade" id="visualization">
-                <div class="system-card">
-                    <div style="background: var(--danger); border-radius: 20px 20px 0 0; padding: 1.5rem; text-align: center;">
-                        <h3 class="text-white mb-0"><i class="fas fa-eye me-3"></i>Sistema de Visualização</h3>
-                    </div>
-                    <div style="padding: 2rem;">
-                        <div class="row g-3">
-                            <div class="col-md-6">
-                                <div class="text-center">
-                                    <a href="/db-preview" class="btn btn-system btn-visualize btn-lg w-100 py-3">
-                                        <i class="fas fa-search me-2"></i>🔍 Preview do Banco
+                                    <a href="/download-domains" class="btn btn-system btn-visualize btn-lg w-100 py-3">
+                                        <i class="fas fa-globe me-2"></i>🌐 Relatório Domínios
                                     </a>
-                                    <small class="text-muted d-block mt-2">Visualizar dados SQLite</small>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="text-center">
-                                    <button class="btn btn-system btn-visualize btn-lg w-100 py-3" onclick="showStats()">
-                                        <i class="fas fa-chart-pie me-2"></i>📈 Estatísticas
-                                    </button>
-                                    <small class="text-muted d-block mt-2">Análise completa dos dados</small>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div id="statsDetails" style="display: none;" class="alert alert-success border-0 mt-4" style="background: rgba(40, 167, 69, 0.1); border-radius: 15px;">
-                            <h5 class="text-success"><i class="fas fa-chart-line me-2"></i>Estatísticas Detalhadas</h5>
-                            <div class="row text-center">
-                                <div class="col-md-3">
-                                    <strong>Total:</strong><br><span class="fs-4 text-info">""" + f"{len(session_data['all_lines']):,}" + """</span>
-                                </div>
-                                <div class="col-md-3">
-                                    <strong>Válidas:</strong><br><span class="fs-4 text-success">""" + f"{session_data['stats'].get('valid_lines', 0):,}" + """</span>
-                                </div>
-                                <div class="col-md-3">
-                                    <strong>Brasileiras:</strong><br><span class="fs-4 text-warning">""" + f"{session_data['stats'].get('brazilian_urls', 0):,}" + """</span>
-                                </div>
-                                <div class="col-md-3">
-                                    <strong>Domínios:</strong><br><span class="fs-4 text-info">""" + f"{len(session_data['stats'].get('domains', set())):,}" + """</span>
+                                    <small class="text-muted d-block mt-2">Lista de domínios únicos</small>
                                 </div>
                             </div>
                         </div>
@@ -565,38 +697,38 @@ html_form = """
             <div class="tab-pane fade" id="settings">
                 <div class="system-card">
                     <div style="background: var(--danger); border-radius: 20px 20px 0 0; padding: 1.5rem; text-align: center;">
-                        <h3 class="text-white mb-0"><i class="fas fa-cog me-3"></i>Configurações do Sistema</h3>
+                        <h3 class="text-white mb-0"><i class="fas fa-cog me-3"></i>Gerenciamento de SQLites</h3>
                     </div>
                     <div style="padding: 2rem;">
                         <div class="row g-3">
                             <div class="col-md-6">
                                 <div class="text-center">
                                     <a href="/clear-data" class="btn btn-system btn-visualize btn-lg w-100 py-3" 
-                                       onclick="return confirm('⚠️ Tem certeza? Todos os dados serão removidos!')">
-                                        <i class="fas fa-trash-alt me-2"></i>🗑️ Limpar Dados
+                                       onclick="return confirm('⚠️ Excluir TODOS os SQLites e dados deste IP?')">
+                                        <i class="fas fa-trash-alt me-2"></i>🗑️ Limpar Todos SQLites
                                     </a>
-                                    <small class="text-muted d-block mt-2">Remover todos os dados processados</small>
+                                    <small class="text-muted d-block mt-2">Remove todos os 4 bancos do seu IP</small>
                                 </div>
                             </div>
                             <div class="col-md-6">
                                 <div class="text-center">
-                                    <button class="btn btn-system btn-visualize btn-lg w-100 py-3" onclick="showSystemInfo()">
-                                        <i class="fas fa-info-circle me-2"></i>ℹ️ Info do Sistema
+                                    <button class="btn btn-system btn-convert btn-lg w-100 py-3" onclick="showSystemInfo()">
+                                        <i class="fas fa-info-circle me-2"></i>ℹ️ Info SQLites
                                     </button>
-                                    <small class="text-muted d-block mt-2">Informações técnicas</small>
+                                    <small class="text-muted d-block mt-2">Estrutura dos bancos</small>
                                 </div>
                             </div>
                         </div>
                         
                         <div id="systemInfo" style="display: none;" class="alert alert-dark border-0 mt-4" style="background: rgba(52, 58, 64, 0.8); border-radius: 15px;">
-                            <h5 class="text-light"><i class="fas fa-server me-2"></i>Sistema TXT Pro v3.0</h5>
+                            <h5 class="text-light"><i class="fas fa-server me-2"></i>Sistema Multi-SQLite v4.0</h5>
                             <ul class="text-muted mb-0">
-                                <li>✅ <strong>Status:</strong> Online</li>
-                                <li>🚀 <strong>Capacidade:</strong> Ilimitada</li>
-                                <li>📁 <strong>Formatos:</strong> TXT, ZIP, RAR</li>
-                                <li>🇧🇷 <strong>Filtros:</strong> URLs Brasileiras</li>
-                                <li>🗄️ <strong>Conversões:</strong> SQLite, CSV</li>
-                                <li>⚡ <strong>Performance:</strong> Otimizada</li>
+                                <li>🗄️ <strong>main.db:</strong> Todas as credenciais processadas</li>
+                                <li>📊 <strong>stats.db:</strong> Estatísticas e contadores</li>
+                                <li>🇧🇷 <strong>brazilian.db:</strong> URLs brasileiras filtradas</li>
+                                <li>🌐 <strong>domains.db:</strong> Domínios únicos e contagens</li>
+                                <li>⏰ <strong>Auto-limpeza:</strong> 30 min de inatividade</li>
+                                <li>🔒 <strong>Isolamento:</strong> 1 IP = 1 conjunto de SQLites</li>
                             </ul>
                         </div>
                     </div>
@@ -615,11 +747,6 @@ html_form = """
             const tabElement = document.querySelector('#' + tabName + '-tab');
             const tab = new bootstrap.Tab(tabElement);
             tab.show();
-        }
-        
-        function showStats() {
-            const statsElement = document.getElementById('statsDetails');
-            statsElement.style.display = statsElement.style.display === 'none' ? 'block' : 'none';
         }
         
         function showSystemInfo() {
@@ -647,7 +774,6 @@ html_form = """
 </html>
 """
 
-# Função otimizada de extração de arquivos
 def extrair_arquivo_comprimido(file):
     try:
         print(f"➤ Extraindo arquivo: {file.filename}")
@@ -678,26 +804,21 @@ def extrair_arquivo_comprimido(file):
         print(f"✗ Erro ao extrair {file.filename}: {str(e)[:50]}")
         return []
 
-# Função otimizada de validação de linha 
 def linha_valida(linha):
     if not linha or len(linha.strip()) == 0:
         return False
     
     linha = linha.strip()
     
-    # Remove aspas se existirem
     if linha.startswith('"') and linha.endswith('"'):
         linha = linha[1:-1].strip()
     
-    # Rejeita linhas muito longas ou muito curtas
     if len(linha) > 200 or len(linha) < 5:
         return False
     
-    # Rejeita caracteres suspeitos rapidamente
     if any(c in linha for c in ['==', '++', '--', '&&', '||', 'Bearer ', 'Token ', 'JWT']):
         return False
     
-    # Rejeita esquemas não-web
     if any(linha.lower().startswith(s) for s in ['android://', 'content://', 'ftp://', 'file://', 'market://']):
         return False
     
@@ -706,31 +827,26 @@ def linha_valida(linha):
     
     partes = linha.split(':')
     
-    # Para HTTPS
     if linha.startswith('https://') and len(partes) >= 4:
         url = ':'.join(partes[:-2])
         user, password = partes[-2].strip(), partes[-1].strip()
         return bool(url and user and password and '.' in url)
     
-    # Para HTTP
     elif linha.startswith('http://') and len(partes) >= 3:
         url = ':'.join(partes[:-2])
         user, password = partes[-2].strip(), partes[-1].strip()
         return bool(url and user and password and '.' in url)
     
-    # Formato simples site.com:user:pass
     elif len(partes) == 3:
         url, user, password = partes[0].strip(), partes[1].strip(), partes[2].strip()
         return bool(url and user and password and '.' in url and not url.startswith('/') and '//' not in url)
     
     return False
 
-# Função otimizada de filtro brasileiro
 def filtrar_urls_brasileiras(linhas):
     print("➤ Filtrando URLs brasileiras...")
     urls_brasileiras = []
     
-    # Domínios e padrões brasileiros otimizados
     br_patterns = ['.br', '.com.br', '.org.br', '.gov.br', '.edu.br', 'uol.com', 'globo.com', 
                   'brasil', 'brazil', 'itau', 'bradesco', 'nubank', 'correios', 'detran']
     
@@ -746,14 +862,15 @@ def filtrar_urls_brasileiras(linhas):
 
 @app.route("/", methods=["GET", "POST"])
 def upload_file():
-    global session_data
+    user_ip = get_user_ip()
+    session = get_user_session(user_ip)
+    ip_hash = get_ip_hash(user_ip)
     
     if request.method == "POST":
         try:
-            print("➤ Iniciando processamento de arquivos...")
+            print(f"➤ Processamento iniciado para IP: {ip_hash}")
             
             filename = request.form.get("filename", "resultado_final").strip() or "resultado_final"
-            session_data['nome_arquivo_final'] = filename
             
             arquivos_processados = []
             total_filtradas = 0
@@ -762,24 +879,75 @@ def upload_file():
                 file = request.files.get(f"file{i}")
                 if file and file.filename and file.filename.lower().endswith((".txt", ".rar", ".zip")):
                     try:
-                        # Extrai conteúdo
                         content = extrair_arquivo_comprimido(file)
                         if not content:
                             continue
                             
                         print(f"➤ Validando linhas de {file.filename}...")
                         
-                        # Processa linhas com otimização
                         filtradas = []
                         for linha in content:
                             linha_limpa = linha.strip()
                             if linha_limpa and linha_valida(linha_limpa):
                                 filtradas.append(linha_limpa)
                         
-                        # Adiciona ao acumulador
-                        session_data['all_lines'].extend(filtradas)
-                        total_filtradas += len(filtradas)
+                        # Salva no SQLite principal
+                        conn = sqlite3.connect(session['databases']['main'])
+                        cursor = conn.cursor()
                         
+                        for linha in filtradas:
+                            try:
+                                partes = linha.split(':')
+                                if linha.startswith(('https://', 'http://')):
+                                    url = ':'.join(partes[:-2])
+                                    username, password = partes[-2], partes[-1]
+                                else:
+                                    url, username, password = partes[0], partes[1], partes[2]
+
+                                cursor.execute('''
+                                INSERT INTO credentials (url, username, password, linha_completa)
+                                VALUES (?, ?, ?, ?)
+                                ''', (url, username, password, linha))
+                                
+                                # Adiciona domínio
+                                try:
+                                    if url.startswith(('http://', 'https://')):
+                                        domain = urlparse(url).netloc
+                                    else:
+                                        domain = url.split('/')[0]
+                                    
+                                    conn_domains = sqlite3.connect(session['databases']['domains'])
+                                    cursor_domains = conn_domains.cursor()
+                                    cursor_domains.execute('''
+                                    INSERT OR IGNORE INTO domains (domain) VALUES (?)
+                                    ''', (domain,))
+                                    cursor_domains.execute('''
+                                    UPDATE domains SET count = count + 1 WHERE domain = ?
+                                    ''', (domain,))
+                                    conn_domains.commit()
+                                    conn_domains.close()
+                                except:
+                                    pass
+
+                            except:
+                                continue
+                        
+                        conn.commit()
+                        conn.close()
+                        
+                        # Processa URLs brasileiras
+                        urls_br = filtrar_urls_brasileiras(filtradas)
+                        if urls_br:
+                            conn_br = sqlite3.connect(session['databases']['brazilian'])
+                            cursor_br = conn_br.cursor()
+                            for url_br in urls_br:
+                                cursor_br.execute('''
+                                INSERT INTO brazilian_urls (url, linha_completa) VALUES (?, ?)
+                                ''', (url_br.split(':')[0], url_br))
+                            conn_br.commit()
+                            conn_br.close()
+                        
+                        total_filtradas += len(filtradas)
                         taxa = (len(filtradas) / len(content) * 100) if content else 0
                         print(f"✓ {file.filename}: {len(filtradas)} válidas ({taxa:.1f}%)")
                         arquivos_processados.append(f"{file.filename} ({len(filtradas)} válidas)")
@@ -789,21 +957,37 @@ def upload_file():
                         arquivos_processados.append(f"{file.filename} (erro)")
             
             # Atualiza estatísticas
-            session_data['stats']['total_lines'] = len(session_data['all_lines'])
-            session_data['stats']['valid_lines'] = len(session_data['all_lines'])
-            session_data['stats']['domains'] = set()
+            update_stats(ip_hash, total_filtradas)
             
-            for linha in session_data['all_lines'][:100]:  # Amostra para performance
-                try:
-                    if linha.startswith(('http://', 'https://')):
-                        domain = urlparse(linha.split(':')[0] + ':' + linha.split(':')[1]).netloc
-                    else:
-                        domain = linha.split(':')[0]
-                    session_data['stats']['domains'].add(domain)
-                except:
-                    pass
+            # Conta domínios únicos
+            try:
+                conn = sqlite3.connect(session['databases']['domains'])
+                cursor = conn.cursor()
+                cursor.execute('SELECT COUNT(*) FROM domains')
+                unique_domains = cursor.fetchone()[0]
+                session['stats']['domains'] = unique_domains
+                
+                # Atualiza URLs brasileiras
+                conn_br = sqlite3.connect(session['databases']['brazilian'])
+                cursor_br = conn_br.cursor()
+                cursor_br.execute('SELECT COUNT(*) FROM brazilian_urls')
+                br_count = cursor_br.fetchone()[0]
+                session['stats']['brazilian_urls'] = br_count
+                
+                # Atualiza stats no banco
+                conn_stats = sqlite3.connect(session['databases']['stats'])
+                cursor_stats = conn_stats.cursor()
+                cursor_stats.execute('''
+                UPDATE stats SET unique_domains = ?, brazilian_urls = ? WHERE id = 1
+                ''', (unique_domains, br_count))
+                conn_stats.commit()
+                conn_stats.close()
+                conn_br.close()
+                conn.close()
+            except:
+                pass
             
-            print(f"✓ Processamento concluído: {total_filtradas} linhas adicionadas")
+            print(f"✓ Processamento concluído para IP {ip_hash}: {total_filtradas} linhas")
             
             if not arquivos_processados:
                 return """
@@ -827,17 +1011,25 @@ def upload_file():
             <div class="card" style="backdrop-filter: blur(10px); background: rgba(255, 255, 255, 0.1); border-radius: 20px;">
             <div class="card-body text-center p-5">
             <i class="fas fa-rocket fs-1 mb-4" style="color: #38ef7d;"></i>
-            <h2 class="text-white mb-4">🎉 Processamento Concluído!</h2>
+            <h2 class="text-white mb-4">🎉 Dados Salvos em SQLites!</h2>
             <div class="alert alert-success border-0" style="background: rgba(56, 239, 125, 0.2); border-radius: 15px;">
             <h5 class="text-white">📁 Arquivos Processados:</h5><div class="mt-3 text-start">{lista_arquivos}</div></div>
+            <div class="alert alert-info border-0" style="background: rgba(23, 162, 184, 0.2); border-radius: 15px;">
+            <h5 class="text-white">🗄️ SQLites Criados:</h5>
+            <ul class="text-start text-white">
+                <li>main.db - {total_filtradas} credenciais</li>
+                <li>stats.db - estatísticas atualizadas</li>
+                <li>brazilian.db - URLs .br filtradas</li>
+                <li>domains.db - domínios únicos</li>
+            </ul></div>
             <div class="row g-3 my-4"><div class="col-md-6">
             <div class="p-3 rounded-3" style="background: rgba(56, 239, 125, 0.2);">
-            <h6 class="text-white">Adicionadas</h6><h4 class="text-white">{total_filtradas:,}</h4></div></div>
+            <h6 class="text-white">Processadas</h6><h4 class="text-white">{total_filtradas:,}</h4></div></div>
             <div class="col-md-6"><div class="p-3 rounded-3" style="background: rgba(102, 126, 234, 0.2);">
-            <h6 class="text-white">Total Acumulado</h6><h4 class="text-white">{len(session_data['all_lines']):,}</h4></div></div></div>
+            <h6 class="text-white">IP Session</h6><h4 class="text-white">{ip_hash}</h4></div></div></div>
             <div class="d-grid gap-3 d-md-flex justify-content-md-center">
             <a href="/" class="btn btn-success btn-lg">🏠 Página Principal</a>
-            <a href="/download" class="btn btn-outline-light btn-lg">💾 Download Completo</a>
+            <a href="/download-all-dbs" class="btn btn-outline-light btn-lg">📦 Baixar Todos SQLites</a>
             </div></div></div></div></div></div></body></html>
             """
             
@@ -845,393 +1037,250 @@ def upload_file():
             print(f"✗ Erro geral no processamento: {str(e)[:100]}")
             return "Erro interno no servidor", 500
 
-    return render_template_string(html_form)
+    # Renderiza página principal com estatísticas do IP
+    stats = session['stats']
+    page_content = html_form.replace('USER_IP_HASH', ip_hash)
+    page_content = page_content.replace('USER_TOTAL_LINES', f"{stats['total_lines']:,}")
+    page_content = page_content.replace('USER_VALID_LINES', f"{stats['valid_lines']:,}")
+    page_content = page_content.replace('USER_BRAZILIAN_URLS', f"{stats['brazilian_urls']:,}")
+    page_content = page_content.replace('USER_DOMAINS', f"{stats['domains']:,}")
+    
+    return page_content
 
 @app.route("/download")
 def download():
-    if not session_data['all_lines']:
-        return "❌ Nenhuma linha processada", 404
+    user_ip = get_user_ip()
+    session = get_user_session(user_ip)
+    
+    try:
+        conn = sqlite3.connect(session['databases']['main'])
+        cursor = conn.cursor()
+        cursor.execute('SELECT linha_completa FROM credentials')
+        results = cursor.fetchall()
+        conn.close()
+        
+        if not results:
+            return "❌ Nenhuma linha processada", 404
+        
+        linhas = [row[0] for row in results]
+        file_content = "\n".join(linhas)
+        
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as tmp_file:
+            tmp_file.write(file_content)
+            tmp_path = tmp_file.name
 
-    print("➤ Gerando download completo...")
-    filename = session_data['nome_arquivo_final'] or "resultado_final"
-    file_content = "\n".join(session_data['all_lines'])
-    
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as tmp_file:
-        tmp_file.write(file_content)
-        tmp_path = tmp_file.name
-
-    print(f"✓ Download preparado: {filename}.txt ({len(session_data['all_lines'])} linhas)")
-    
-    # Auto cleanup após 30 segundos
-    import threading
-    def cleanup():
-        try:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-                print("✓ Arquivo temporário limpo")
-        except:
-            pass
-    
-    threading.Timer(30.0, cleanup).start()
-    return send_file(tmp_path, as_attachment=True, download_name=f"{filename}.txt")
+        print(f"✓ Download preparado: {len(linhas)} linhas do SQLite principal")
+        
+        def cleanup():
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except:
+                pass
+        
+        threading.Timer(30.0, cleanup).start()
+        return send_file(tmp_path, as_attachment=True, download_name="resultado_completo.txt")
+        
+    except Exception as e:
+        print(f"✗ Erro no download: {e}")
+        return "❌ Erro ao gerar download", 500
 
 @app.route("/filter-br")
 def filter_br():
-    if not session_data['all_lines']:
-        return "❌ Nenhuma linha processada. <a href='/'>Voltar</a>", 404
-
+    user_ip = get_user_ip()
+    session = get_user_session(user_ip)
+    ip_hash = get_ip_hash(user_ip)
+    
     try:
-        print("➤ Aplicando filtro brasileiro...")
-        urls_br = filtrar_urls_brasileiras(session_data['all_lines'])
-        session_data['stats']['brazilian_urls'] = len(urls_br)
-
-        if not urls_br:
-            return """
+        conn = sqlite3.connect(session['databases']['brazilian'])
+        cursor = conn.cursor()
+        cursor.execute('SELECT linha_completa FROM brazilian_urls')
+        results = cursor.fetchall()
+        conn.close()
+        
+        if not results:
+            return f"""
             <!doctype html>
             <html lang="pt-BR" data-bs-theme="dark">
             <head><meta charset="utf-8"><title>Filtro BR</title>
             <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet"></head>
             <body style="background: linear-gradient(135deg, #ff7b7b 0%, #ff9a56 100%); min-height: 100vh;">
             <div class="container py-5"><div class="card text-center" style="backdrop-filter: blur(10px); background: rgba(255, 255, 255, 0.1);">
-            <div class="card-body p-5"><h2 class="text-white mb-4">🇧🇷 Filtro Aplicado</h2>
-            <div class="alert alert-warning"><strong>❌ Nenhuma URL brasileira encontrada</strong></div>
+            <div class="card-body p-5"><h2 class="text-white mb-4">🇧🇷 Filtro Brasileiro</h2>
+            <div class="alert alert-warning"><strong>❌ Nenhuma URL brasileira no SQLite</strong></div>
             <a href="/" class="btn btn-light btn-lg">🏠 Página Principal</a></div></div></div></body></html>
             """
 
-        nome_arquivo_br = f"{session_data['nome_arquivo_final'] or 'resultado_final'}_brasileiro"
-        file_path = os.path.join(tempfile.gettempdir(), f"{nome_arquivo_br}.txt")
+        linhas_br = [row[0] for row in results]
+        file_content = "\n".join(linhas_br)
         
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(urls_br))
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as tmp_file:
+            tmp_file.write(file_content)
+            tmp_path = tmp_file.name
         
-        print(f"✓ Filtro brasileiro aplicado: {len(urls_br)} URLs")
-
-        return f"""
-        <!doctype html>
-        <html lang="pt-BR" data-bs-theme="dark">
-        <head><meta charset="utf-8"><title>🇧🇷 Filtro Brasileiro</title>
-        <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
-        <style>body{{background: linear-gradient(135deg, #ff7b7b 0%, #ff9a56 100%); min-height: 100vh;}}</style></head>
-        <body><div class="container py-5"><div class="card" style="backdrop-filter: blur(10px); background: rgba(255, 255, 255, 0.1);">
-        <div class="card-header text-center py-4" style="background: linear-gradient(45deg, #ff7b7b 0%, #ff9a56 100%);">
-        <h1 class="text-white"><i class="fas fa-flag me-3"></i>🇧🇷 URLs Brasileiras</h1></div>
-        <div class="card-body text-center p-4">
-        <div class="alert alert-success border-0" style="background: rgba(40, 167, 69, 0.2);">
-        <strong>{len(urls_br):,}</strong> URLs brasileiras de <strong>{len(session_data['all_lines']):,}</strong> total</div>
-        <div class="d-grid gap-2 d-md-flex justify-content-md-center mt-4">
-        <a href="/download-filtered/{nome_arquivo_br}" class="btn btn-success btn-lg">💾 Baixar URLs .BR</a>
-        <a href="/" class="btn btn-secondary btn-lg">🏠 Página Principal</a>
-        </div></div></div></div></body></html>
-        """
+        def cleanup():
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except:
+                pass
+        
+        threading.Timer(30.0, cleanup).start()
+        return send_file(tmp_path, as_attachment=True, download_name=f"urls_brasileiras_{ip_hash}.txt")
 
     except Exception as e:
-        print(f"✗ Erro no filtro brasileiro: {str(e)[:50]}")
+        print(f"✗ Erro no filtro brasileiro: {e}")
         return "❌ Erro ao processar filtro", 500
 
-@app.route("/download-filtered/<filename>")
-def download_filtered(filename):
+@app.route("/download-all-dbs")
+def download_all_dbs():
+    user_ip = get_user_ip()
+    session = get_user_session(user_ip)
+    ip_hash = get_ip_hash(user_ip)
+    
     try:
-        file_path = os.path.join(tempfile.gettempdir(), f"{filename}.txt")
-        if os.path.exists(file_path):
-            print(f"➤ Download filtrado: {filename}.txt")
-            
-            # Auto cleanup
-            def cleanup():
-                try:
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                        print("✓ Arquivo filtrado limpo")
-                except:
-                    pass
-            
-            import threading
-            threading.Timer(30.0, cleanup).start()
-            return send_file(file_path, as_attachment=True, download_name=f"{filename}.txt")
-        else:
-            return "❌ Arquivo não encontrado", 404
-    except Exception as e:
-        print(f"✗ Erro no download filtrado: {str(e)[:50]}")
-        return "❌ Erro ao baixar arquivo", 500
-
-@app.route("/txt-to-db")
-def txt_to_db():
-    if not session_data['all_lines']:
-        return "❌ Nenhuma linha processada. <a href='/'>Voltar</a>", 404
-
-    try:
-        print("➤ Convertendo para banco SQLite...")
-        nome_arquivo = session_data['nome_arquivo_final'] or "resultado_final"
-        db_filename = f"{nome_arquivo}_database.db"
-        db_path = os.path.join(tempfile.gettempdir(), db_filename)
+        # Cria ZIP com todos os SQLites
+        zip_path = os.path.join(tempfile.gettempdir(), f"sqlites_{ip_hash}.zip")
         
-        if os.path.exists(db_path):
-            os.remove(db_path)
-
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        cursor.execute('''
-        CREATE TABLE credenciais (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            url TEXT NOT NULL,
-            usuario TEXT NOT NULL,
-            senha TEXT NOT NULL,
-            linha_completa TEXT NOT NULL,
-            dominio TEXT,
-            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        ''')
-
-        cursor.execute('CREATE INDEX idx_url ON credenciais(url)')
-        cursor.execute('CREATE INDEX idx_dominio ON credenciais(dominio)')
-
-        dados_inseridos = 0
-        for linha in session_data['all_lines']:
+        with zipfile.ZipFile(zip_path, 'w') as zip_file:
+            for db_name, db_path in session['databases'].items():
+                if os.path.exists(db_path):
+                    zip_file.write(db_path, f"{db_name}.db")
+        
+        print(f"✓ Pack SQLites criado para IP {ip_hash}")
+        
+        def cleanup():
             try:
-                partes = linha.split(':')
-                if len(partes) >= 3:
-                    if linha.startswith(('https://', 'http://')):
-                        url = ':'.join(partes[:-2])
-                        usuario, senha = partes[-2], partes[-1]
-                    else:
-                        url, usuario, senha = partes[0], partes[1], partes[2]
-
-                    try:
-                        if url.startswith(('http://', 'https://')):
-                            dominio = urlparse(url).netloc
-                        else:
-                            dominio = url.split('/')[0]
-                    except:
-                        dominio = url
-
-                    cursor.execute('''
-                    INSERT INTO credenciais (url, usuario, senha, linha_completa, dominio)
-                    VALUES (?, ?, ?, ?, ?)
-                    ''', (url, usuario, senha, linha, dominio))
-                    
-                    dados_inseridos += 1
-
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
             except:
-                continue
-
-        conn.commit()
-        conn.close()
-
-        print(f"✓ Banco SQLite criado: {dados_inseridos} registros")
-
-        return f"""
-        <!doctype html>
-        <html lang="pt-BR" data-bs-theme="dark">
-        <head><meta charset="utf-8"><title>🗄️ Banco Criado</title>
-        <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
-        <style>body{{background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh;}}</style></head>
-        <body><div class="container py-5"><div class="card" style="backdrop-filter: blur(10px); background: rgba(255, 255, 255, 0.1);">
-        <div class="card-header text-center py-4" style="background: linear-gradient(45deg, #ffecd2 0%, #fcb69f 100%);">
-        <h1 class="text-dark"><i class="fas fa-database me-3"></i>🗄️ Banco SQLite Criado</h1></div>
-        <div class="card-body text-center p-4">
-        <div class="alert alert-success border-0" style="background: rgba(40, 167, 69, 0.2);">
-        <strong>{dados_inseridos:,}</strong> registros inseridos no banco</div>
-        <div class="alert alert-info border-0" style="background: rgba(23, 162, 184, 0.2);">
-        <h6>📊 Tabela 'credenciais' criada com:</h6>
-        <p>• ID, URL, Usuário, Senha, Domínio, Data</p></div>
-        <div class="d-grid gap-2 d-md-flex justify-content-md-center mt-4">
-        <a href="/download-db/{db_filename[:-3]}" class="btn btn-info btn-lg">💾 Baixar Banco SQLite</a>
-        <a href="/" class="btn btn-secondary btn-lg">🏠 Página Principal</a>
-        </div></div></div></div></body></html>
-        """
-
+                pass
+        
+        threading.Timer(60.0, cleanup).start()
+        return send_file(zip_path, as_attachment=True, download_name=f"pack_sqlites_{ip_hash}.zip")
+        
     except Exception as e:
-        print(f"✗ Erro ao criar banco SQLite: {str(e)[:50]}")
-        return "❌ Erro ao criar banco de dados", 500
+        print(f"✗ Erro ao criar pack SQLites: {e}")
+        return "❌ Erro ao criar pack", 500
 
-@app.route("/download-db/<filename>")
-def download_db(filename):
+@app.route("/download-domains")
+def download_domains():
+    user_ip = get_user_ip()
+    session = get_user_session(user_ip)
+    
     try:
-        db_path = os.path.join(tempfile.gettempdir(), f"{filename}.db")
-        if os.path.exists(db_path):
-            print(f"➤ Download do banco: {filename}.db")
-            
-            def cleanup():
-                try:
-                    if os.path.exists(db_path):
-                        os.remove(db_path)
-                        print("✓ Banco temporário limpo")
-                except:
-                    pass
-            
-            import threading
-            threading.Timer(60.0, cleanup).start()
-            return send_file(db_path, as_attachment=True, download_name=f"{filename}.db")
-        else:
-            return "❌ Banco não encontrado", 404
+        conn = sqlite3.connect(session['databases']['domains'])
+        cursor = conn.cursor()
+        cursor.execute('SELECT domain, count FROM domains ORDER BY count DESC')
+        results = cursor.fetchall()
+        conn.close()
+        
+        if not results:
+            return "❌ Nenhum domínio processado", 404
+        
+        content = "DOMÍNIO:QUANTIDADE\n"
+        for domain, count in results:
+            content += f"{domain}:{count}\n"
+        
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as tmp_file:
+            tmp_file.write(content)
+            tmp_path = tmp_file.name
+        
+        def cleanup():
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except:
+                pass
+        
+        threading.Timer(30.0, cleanup).start()
+        return send_file(tmp_path, as_attachment=True, download_name="relatorio_dominios.txt")
+        
     except Exception as e:
-        print(f"✗ Erro no download do banco: {str(e)[:50]}")
-        return "❌ Erro ao baixar banco", 500
+        print(f"✗ Erro no relatório de domínios: {e}")
+        return "❌ Erro ao gerar relatório", 500
 
 @app.route("/clear-data")
 def clear_data():
-    global session_data
-    linhas_removidas = len(session_data['all_lines'])
-    session_data['all_lines'] = []
-    session_data['stats'] = {
-        'total_lines': 0,
-        'valid_lines': 0,
-        'brazilian_urls': 0,
-        'domains': set()
-    }
+    user_ip = get_user_ip()
+    ip_hash = get_ip_hash(user_ip)
     
-    print(f"✓ Dados limpos: {linhas_removidas} linhas removidas")
-    
-    return f"""
-    <!doctype html>
-    <html lang="pt-BR" data-bs-theme="dark">
-    <head><meta charset="utf-8"><title>🗑️ Limpo</title>
-    <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
-    <style>body{{background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%); min-height: 100vh;}}</style></head>
-    <body><div class="container py-5"><div class="card" style="backdrop-filter: blur(10px); background: rgba(255, 255, 255, 0.1);">
-    <div class="card-header text-center py-4" style="background: linear-gradient(45deg, #ff6b6b 0%, #ee5a52 100%);">
-    <h1 class="text-white"><i class="fas fa-trash-alt me-3"></i>🗑️ Dados Limpos</h1></div>
-    <div class="card-body text-center p-4">
-    <div class="alert alert-success border-0" style="background: rgba(40, 167, 69, 0.2);">
-    <strong>{linhas_removidas:,}</strong> linhas removidas da memória</div>
-    <div class="alert alert-info border-0" style="background: rgba(23, 162, 184, 0.2);">
-    <strong>✅ Sistema Resetado:</strong> Pronto para novos arquivos</div>
-    <a href="/" class="btn btn-success btn-lg">🏠 Página Principal</a>
-    </div></div></div></body></html>
-    """
+    try:
+        # Remove todos os bancos SQLite do IP
+        if ip_hash in IP_SESSIONS:
+            db_dir = os.path.dirname(IP_SESSIONS[ip_hash]['databases']['main'])
+            if os.path.exists(db_dir):
+                import shutil
+                shutil.rmtree(db_dir)
+            
+            # Cancela timer de limpeza
+            if ip_hash in CLEANUP_TIMERS:
+                CLEANUP_TIMERS[ip_hash].cancel()
+                del CLEANUP_TIMERS[ip_hash]
+            
+            # Remove da memória
+            del IP_SESSIONS[ip_hash]
+        
+        print(f"✓ Limpeza manual realizada para IP {ip_hash}")
+        
+        return f"""
+        <!doctype html>
+        <html lang="pt-BR" data-bs-theme="dark">
+        <head><meta charset="utf-8"><title>🗑️ Limpo</title>
+        <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+        <style>body{{background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%); min-height: 100vh;}}</style></head>
+        <body><div class="container py-5"><div class="card" style="backdrop-filter: blur(10px); background: rgba(255, 255, 255, 0.1);">
+        <div class="card-header text-center py-4" style="background: linear-gradient(45deg, #ff6b6b 0%, #ee5a52 100%);">
+        <h1 class="text-white"><i class="fas fa-trash-alt me-3"></i>🗑️ SQLites Limpos</h1></div>
+        <div class="card-body text-center p-4">
+        <div class="alert alert-success border-0" style="background: rgba(40, 167, 69, 0.2);">
+        <strong>✅ Todos os 4 SQLites removidos</strong><br>
+        <small>main.db • stats.db • brazilian.db • domains.db</small></div>
+        <div class="alert alert-info border-0" style="background: rgba(23, 162, 184, 0.2);">
+        <strong>🔄 IP {ip_hash}:</strong> Pronto para novos dados</div>
+        <a href="/" class="btn btn-success btn-lg">🏠 Reiniciar Sistema</a>
+        </div></div></div></body></html>
+        """
+        
+    except Exception as e:
+        print(f"✗ Erro na limpeza: {e}")
+        return "❌ Erro ao limpar dados", 500
 
-@app.route("/db-preview", methods=["GET", "POST"])
-def db_preview():
-    if request.method == "POST":
+# Limpeza periódica de IPs inativos
+def cleanup_inactive_ips():
+    """Remove IPs inativos periodicamente"""
+    while True:
         try:
-            db_file = request.files.get("db_file")
-            if not db_file or not db_file.filename or not db_file.filename.endswith('.db'):
-                return """
-                <!doctype html>
-                <html lang="pt-BR" data-bs-theme="dark">
-                <head><meta charset="utf-8"><title>Erro</title>
-                <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet"></head>
-                <body><div class="container mt-5"><div class="alert alert-danger">
-                <h4>❌ Arquivo Inválido</h4><p>Selecione um arquivo .db válido.</p></div>
-                <a href="/db-preview" class="btn btn-secondary">← Tentar Novamente</a></div></body></html>
-                """
-
-            print(f"➤ Visualizando banco: {db_file.filename}")
-            temp_db_path = os.path.join(tempfile.gettempdir(), f"preview_{db_file.filename}")
-            db_file.save(temp_db_path)
-
-            conn = sqlite3.connect(temp_db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-            tabelas = cursor.fetchall()
-
-            preview_html = f"""
-            <!doctype html>
-            <html lang="pt-BR" data-bs-theme="dark">
-            <head><meta charset="utf-8"><title>Preview: {db_file.filename}</title>
-            <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
-            <style>body{{background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); min-height: 100vh;}}
-            .table-responsive{{max-height: 400px; overflow-y: auto; border-radius: 10px;}}</style></head>
-            <body><div class="container py-4"><div class="card">
-            <div class="card-header text-center" style="background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%);">
-            <h2 class="text-white"><i class="fas fa-database me-2"></i>Preview: {db_file.filename}</h2></div>
-            <div class="card-body"><div class="alert alert-info">
-            <strong>📊 Tabelas encontradas:</strong> {len(tabelas)}</div>
-            """
-
-            for tabela in tabelas:
-                nome_tabela = tabela[0]
-                cursor.execute(f"SELECT * FROM {nome_tabela} LIMIT 10")
-                dados = cursor.fetchall()
-                cursor.execute(f"PRAGMA table_info({nome_tabela})")
-                colunas = [col[1] for col in cursor.fetchall()]
-
-                preview_html += f"""
-                <div class="mb-4"><h4>📋 Tabela: {nome_tabela}</h4>
-                <p class="text-muted">Mostrando até 10 registros</p>
-                <div class="table-responsive"><table class="table table-striped">
-                <thead class="table-dark"><tr>"""
-                
-                for coluna in colunas:
-                    preview_html += f"<th>{coluna}</th>"
-                preview_html += "</tr></thead><tbody>"
-                
-                for linha in dados:
-                    preview_html += "<tr>"
-                    for valor in linha:
-                        valor_str = str(valor)[:50] + "..." if len(str(valor)) > 50 else str(valor)
-                        preview_html += f"<td>{valor_str}</td>"
-                    preview_html += "</tr>"
-                
-                preview_html += "</tbody></table></div></div>"
-
-            preview_html += """
-            <div class="text-center">
-            <a href="/db-preview" class="btn btn-primary me-2">🔄 Outro DB</a>
-            <a href="/" class="btn btn-secondary">🏠 Página Principal</a>
-            </div></div></div></div></body></html>
-            """
-
-            conn.close()
-            print(f"✓ Preview gerado para {db_file.filename}")
-
-            def cleanup():
+            now = datetime.now()
+            inactive_ips = []
+            
+            for ip_hash, session_data in IP_SESSIONS.items():
+                if now - session_data['last_activity'] > timedelta(minutes=30):
+                    inactive_ips.append(ip_hash)
+            
+            for ip_hash in inactive_ips:
                 try:
-                    if os.path.exists(temp_db_path):
-                        os.remove(temp_db_path)
-                        print("✓ DB temporário do preview limpo")
+                    db_dir = os.path.dirname(IP_SESSIONS[ip_hash]['databases']['main'])
+                    if os.path.exists(db_dir):
+                        import shutil
+                        shutil.rmtree(db_dir)
+                    
+                    if ip_hash in CLEANUP_TIMERS:
+                        CLEANUP_TIMERS[ip_hash].cancel()
+                        del CLEANUP_TIMERS[ip_hash]
+                    
+                    del IP_SESSIONS[ip_hash]
+                    print(f"✓ Limpeza automática: IP {ip_hash} removido por inatividade")
                 except:
                     pass
-            
-            import threading
-            threading.Timer(60.0, cleanup).start()
-            return preview_html
+                    
+        except:
+            pass
+        
+        time.sleep(600)  # Verifica a cada 10 minutos
 
-        except Exception as e:
-            print(f"✗ Erro no preview do DB: {str(e)[:50]}")
-            return """
-            <!doctype html>
-            <html lang="pt-BR" data-bs-theme="dark">
-            <head><meta charset="utf-8"><title>Erro</title>
-            <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet"></head>
-            <body><div class="container mt-5"><div class="alert alert-danger">
-            <h4>❌ Erro ao Visualizar</h4><p>Erro ao processar arquivo .db.</p></div>
-            <a href="/db-preview" class="btn btn-secondary">← Tentar Novamente</a></div></body></html>
-            """
+# Inicia thread de limpeza
+cleanup_thread = threading.Thread(target=cleanup_inactive_ips, daemon=True)
+cleanup_thread.start()
 
-    return """
-    <!doctype html>
-    <html lang="pt-BR" data-bs-theme="dark">
-    <head><meta charset="utf-8"><title>Visualizador DB</title>
-    <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
-    <style>body{background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); min-height: 100vh;}
-    .file-upload-area{border: 2px dashed rgba(255, 255, 255, 0.3); border-radius: 15px; padding: 40px; 
-    text-align: center; cursor: pointer; transition: all 0.3s ease;}
-    .file-upload-area:hover{border-color: #4facfe; background: rgba(79, 172, 254, 0.1);}</style></head>
-    <body><div class="container py-5"><div class="card" style="backdrop-filter: blur(10px); background: rgba(255, 255, 255, 0.1);">
-    <div class="card-header text-center py-4" style="background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%);">
-    <h1 class="text-white"><i class="fas fa-search me-3"></i>Visualizador de Banco</h1></div>
-    <div class="card-body p-4">
-    <div class="alert alert-info border-0" style="background: rgba(79, 172, 254, 0.2);">
-    <strong>🔒 Seguro:</strong> Visualização local sem armazenamento<br>
-    <small>✅ SQLite • ✅ Preview de tabelas • ✅ Auto-exclusão</small></div>
-    <form method="post" enctype="multipart/form-data">
-    <div class="file-upload-area mb-4" onclick="document.getElementById('db_file').click()">
-    <i class="fas fa-cloud-upload-alt fs-1 text-primary mb-3"></i>
-    <h4>Clique para selecionar arquivo .db</h4>
-    <input type="file" id="db_file" name="db_file" accept=".db" style="display: none;" onchange="updateFileName(this)">
-    <div id="fileName" class="mt-2"></div></div>
-    <div class="d-grid"><button type="submit" class="btn btn-primary btn-lg">🔍 Visualizar Banco</button></div>
-    </form><div class="text-center mt-4">
-    <a href="/" class="btn btn-secondary btn-lg">🏠 Voltar</a></div>
-    </div></div></div>
-    <script>function updateFileName(input) {
-    const fileName = document.getElementById('fileName');
-    if (input.files[0]) {
-    fileName.innerHTML = '<strong>📁 Arquivo:</strong> ' + input.files[0].name;
-    fileName.className = 'alert alert-success';
-    }}</script></body></html>
-    """
-
-# Configuração otimizada
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
