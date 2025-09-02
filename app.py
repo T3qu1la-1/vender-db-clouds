@@ -1,3 +1,4 @@
+
 from flask import Flask, request, render_template_string, send_file
 import os
 import logging
@@ -40,7 +41,7 @@ def get_user_ip():
         'HTTP_FORWARDED',             # RFC 7239
         'REMOTE_ADDR'                 # IP direto
     ]
-
+    
     # Tenta request.headers primeiro
     for header in ['CF-Connecting-IP', 'X-Forwarded-For', 'X-Real-IP', 'X-Forwarded', 'X-Cluster-Client-IP']:
         ip = request.headers.get(header)
@@ -49,7 +50,7 @@ def get_user_ip():
             real_ip = ip.split(',')[0].strip()
             if real_ip and real_ip != 'unknown':
                 return real_ip
-
+    
     # Tenta request.environ
     for header in ip_headers:
         ip = request.environ.get(header)
@@ -57,7 +58,7 @@ def get_user_ip():
             real_ip = ip.split(',')[0].strip()
             if real_ip and real_ip != 'unknown':
                 return real_ip
-
+    
     # Fallback para REMOTE_ADDR
     return request.environ.get('REMOTE_ADDR', f'temp_{int(time.time())}')
 
@@ -71,25 +72,25 @@ def get_ip_hash(ip):
 def create_ip_databases(ip_hash, real_ip=None):
     """Cria bancos SQLite específicos para o IP - apenas se não existirem"""
     db_dir = os.path.join(tempfile.gettempdir(), f"user_{ip_hash}")
-
+    
     databases = {
         'main': os.path.join(db_dir, 'main.db'),
         'stats': os.path.join(db_dir, 'stats.db'),
         'brazilian': os.path.join(db_dir, 'brazilian.db'),
         'domains': os.path.join(db_dir, 'domains.db')
     }
-
+    
     # Verifica se SQLites já existem
     if all(os.path.exists(db_path) for db_path in databases.values()):
         print(f"♻️ SQLites existentes encontrados para IP: {real_ip} -> Hash: {ip_hash}")
         print(f"📁 Diretório SQLite: {db_dir}")
         return databases
-
+    
     # Cria diretório apenas se necessário
     os.makedirs(db_dir, exist_ok=True)
     print(f"🗄️ Criando novos SQLites para IP real: {real_ip} -> Hash: {ip_hash}")
     print(f"📁 Diretório SQLite: {db_dir}")
-
+    
     # Cria tabela principal
     conn = sqlite3.connect(databases['main'])
     cursor = conn.cursor()
@@ -105,7 +106,7 @@ def create_ip_databases(ip_hash, real_ip=None):
     ''')
     conn.commit()
     conn.close()
-
+    
     # Cria tabela de estatísticas
     conn = sqlite3.connect(databases['stats'])
     cursor = conn.cursor()
@@ -123,7 +124,7 @@ def create_ip_databases(ip_hash, real_ip=None):
     cursor.execute('INSERT OR IGNORE INTO stats (id, total_lines, valid_lines, brazilian_urls, unique_domains) VALUES (1, 0, 0, 0, 0)')
     conn.commit()
     conn.close()
-
+    
     # Cria tabela de URLs brasileiras
     conn = sqlite3.connect(databases['brazilian'])
     cursor = conn.cursor()
@@ -137,7 +138,7 @@ def create_ip_databases(ip_hash, real_ip=None):
     ''')
     conn.commit()
     conn.close()
-
+    
     # Cria tabela de domínios
     conn = sqlite3.connect(databases['domains'])
     cursor = conn.cursor()
@@ -151,13 +152,13 @@ def create_ip_databases(ip_hash, real_ip=None):
     ''')
     conn.commit()
     conn.close()
-
+    
     return databases
 
 def get_user_session(ip):
     """Obtém ou cria sessão do usuário por IP real"""
     ip_hash = get_ip_hash(ip)
-
+    
     if ip_hash not in IP_SESSIONS:
         # Verifica se SQLites já existem no disco
         db_dir = os.path.join(tempfile.gettempdir(), f"user_{ip_hash}")
@@ -167,20 +168,20 @@ def get_user_session(ip):
             'brazilian': os.path.join(db_dir, 'brazilian.db'),
             'domains': os.path.join(db_dir, 'domains.db')
         }
-
+        
         # Se SQLites já existem, apenas reconecta
         if all(os.path.exists(db_path) for db_path in databases.values()):
             print(f"♻️ Reconectando SQLites existentes para IP: {ip} -> Hash: {ip_hash}")
         else:
             # Cria novos SQLites apenas se necessário
             databases = create_ip_databases(ip_hash, ip)
-
+        
         IP_SESSIONS[ip_hash] = {
             'databases': databases,
             'last_activity': datetime.now(),
             'stats': {'total_lines': 0, 'valid_lines': 0, 'brazilian_urls': 0, 'domains': 0}
         }
-
+        
         # Carrega estatísticas do banco existente
         try:
             conn = sqlite3.connect(databases['stats'])
@@ -190,7 +191,7 @@ def get_user_session(ip):
             if result:
                 IP_SESSIONS[ip_hash]['stats'] = {
                     'total_lines': result[0],
-                    'valid_lines': result[1],
+                    'valid_lines': result[1], 
                     'brazilian_urls': result[2],
                     'domains': result[3]
                 }
@@ -199,7 +200,7 @@ def get_user_session(ip):
         except Exception as e:
             print(f"⚠️ Erro ao carregar stats: {e}")
             pass
-
+    
     return IP_SESSIONS[ip_hash]
 
 def processar_streaming_direto(file, session, ip_hash):
@@ -209,15 +210,15 @@ def processar_streaming_direto(file, session, ip_hash):
         file_size = file.tell()
         file.seek(0)
         file_size_mb = file_size / (1024 * 1024)
-
+        
         print(f"🚀 STREAMING 500MB+: {file_size_mb:.1f}MB direto para 4 shards")
-
+        
         # Abre conexões com os 4 shards simultaneamente
         shard_connections = {}
         for shard_num in range(4):
             db_path = os.path.join(os.path.dirname(session['databases']['main']), f"upload_shard_{shard_num}.db")
             conn = sqlite3.connect(db_path)
-
+            
             # PRAGMA ultra-performance para 500MB+
             conn.execute('PRAGMA journal_mode=OFF')
             conn.execute('PRAGMA synchronous=OFF')
@@ -225,7 +226,7 @@ def processar_streaming_direto(file, session, ip_hash):
             conn.execute('PRAGMA temp_store=MEMORY')
             conn.execute('PRAGMA mmap_size=2147483648')  # 2GB mmap
             conn.execute('BEGIN TRANSACTION')
-
+            
             # Cria tabela se não existir
             cursor = conn.cursor()
             cursor.execute('''
@@ -242,46 +243,43 @@ def processar_streaming_direto(file, session, ip_hash):
             ''')
             conn.commit()
             conn.execute('BEGIN TRANSACTION')
-
+            
             shard_connections[shard_num] = conn
             print(f"   📦 Shard {shard_num} preparado para streaming")
-
+        
         # Streaming com distribuição nos shards
         total_valid = 0
         linha_buffer = ""
         chunk_size = 65536  # 64KB chunks para arquivos gigantes
         bytes_processed = 0
         shard_batches = {0: [], 1: [], 2: [], 3: []}
-        br_batch = [] # Batch para URLs brasileiras
-        br_count = 0 # Contador de URLs brasileiras
-        domains_set = set() # Conjunto de domínios únicos
         batch_size = 1000
-
+        
         import hashlib
-
+        
         while True:
             chunk = file.read(chunk_size)
             if not chunk:
                 break
-
+            
             bytes_processed += len(chunk)
             progress = (bytes_processed / file_size) * 100
-
+            
             try:
                 chunk_text = chunk.decode('utf-8', errors='ignore')
             except:
                 continue
-
+                
             linha_buffer += chunk_text
-
+            
             # Processa linhas e distribui entre shards
             while '\n' in linha_buffer:
                 linha, linha_buffer = linha_buffer.split('\n', 1)
                 linha_limpa = linha.strip()
-
+                
                 if not linha_limpa or not linha_valida(linha_limpa):
                     continue
-
+                
                 try:
                     partes = linha_limpa.split(':')
                     if linha_limpa.startswith(('https://', 'http://')):
@@ -289,36 +287,20 @@ def processar_streaming_direto(file, session, ip_hash):
                         username, password = partes[-2], partes[-1]
                     else:
                         url, username, password = partes[0], partes[1], partes[2]
-
+                    
                     # Determina shard baseado no hash da linha
                     linha_hash = hashlib.md5(linha_limpa.encode()).hexdigest()
                     shard_num = int(linha_hash, 16) % 4
-
+                    
                     shard_batches[shard_num].append((url, username, password, linha_limpa, file.filename, shard_num))
-
-                    # Processa URLs brasileiras durante streaming
-                    if any(br in url.lower() for br in ['.br', '.com.br', 'uol.com', 'globo.com', 'brasil', 'itau', 'bradesco', 'nubank']):
-                        br_batch.append((url, linha_limpa))
-                        br_count += 1
-
-                    # Processa domínios
-                    try:
-                        if url.startswith(('http://', 'https://')):
-                            domain = urlparse(url).netloc
-                        else:
-                            domain = url.split('/')[0]
-                        if domain:
-                            domains_set.add(domain)
-                    except:
-                        pass
-
+                    
                 except:
                     continue
-
+            
             # Processa lotes quando atingir tamanho para cada shard
             total_items = sum(len(batch) for batch in shard_batches.values())
             if total_items >= batch_size * 4:
-
+                
                 for shard_num, batch_data in shard_batches.items():
                     if batch_data:
                         cursor = shard_connections[shard_num].cursor()
@@ -329,14 +311,17 @@ def processar_streaming_direto(file, session, ip_hash):
                         shard_connections[shard_num].commit()
                         shard_connections[shard_num].execute('BEGIN TRANSACTION')
                         total_valid += len(batch_data)
-
+                
                 # Mostra progresso detalhado
                 if total_valid % 50000 == 0:
                     print(f"   🚀 STREAM {progress:.1f}%: {total_valid:,} válidas, {bytes_processed/(1024*1024):.1f}MB processados")
-
+                
                 # Limpa batches
                 shard_batches = {0: [], 1: [], 2: [], 3: []}
-
+            
+            # Libera chunk da memória
+            del chunk, chunk_text
+        
         # Processa lotes finais
         for shard_num, batch_data in shard_batches.items():
             if batch_data:
@@ -347,70 +332,25 @@ def processar_streaming_direto(file, session, ip_hash):
                 ''', batch_data)
                 shard_connections[shard_num].commit()
                 total_valid += len(batch_data)
-
-        # Insere dados auxiliares (URLs brasileiras e domínios)
-        if br_batch:
-            conn_br = sqlite3.connect(session['databases']['brazilian'])
-            optimize_sqlite_for_large_uploads(conn_br) # Otimiza conexão do banco brasileiro
-            cursor_br = conn_br.cursor()
-            cursor_br.executemany('INSERT INTO brazilian_urls (url, linha_completa) VALUES (?, ?)', br_batch)
-            conn_br.commit()
-            conn_br.close()
-            print(f"   🇧🇷 Inseridas {br_count:,} URLs brasileiras")
-
-        if domains_set:
-            conn_domains = sqlite3.connect(session['databases']['domains'])
-            optimize_sqlite_for_large_uploads(conn_domains) # Otimiza conexão do banco de domínios
-            cursor_domains = conn_domains.cursor()
-            for domain in domains_set:
-                cursor_domains.execute('INSERT OR IGNORE INTO domains (domain) VALUES (?)', (domain,))
-                cursor_domains.execute('UPDATE domains SET count = count + 1 WHERE domain = ?', (domain,))
-            conn_domains.commit()
-            conn_domains.close()
-            print(f"   🌐 Inseridos {len(domains_set):,} domínios únicos")
-
-        # Atualiza estatísticas globais
-        session['stats']['valid_lines'] += total_valid
-        session['stats']['brazilian_urls'] += br_count
-        session['stats']['domains'] = max(session['stats']['domains'], len(domains_set)) # Atualiza o contador de domínios únicos
-
-        # Salva estatísticas atualizadas no banco de dados
-        try:
-            conn_stats = sqlite3.connect(session['databases']['stats'])
-            cursor_stats = conn_stats.cursor()
-            cursor_stats.execute('''
-            UPDATE stats SET 
-                total_lines = ?, 
-                valid_lines = ?, 
-                brazilian_urls = ?,
-                unique_domains = ?, 
-                last_update = CURRENT_TIMESTAMP 
-            WHERE id = 1
-            ''', (session['stats']['total_lines'], session['stats']['valid_lines'], session['stats']['brazilian_urls'], session['stats']['domains']))
-            conn_stats.commit()
-            conn_stats.close()
-        except Exception as e:
-            print(f"✗ Erro ao atualizar stats consolidadas: {e}")
-
+        
         # Fecha conexões
         for conn in shard_connections.values():
             conn.close()
-
+        
         print(f"✅ STREAMING 500MB+ COMPLETO: {total_valid:,} linhas nos 4 shards!")
-
+        
         # Exibe distribuição final
         for shard_num in range(4):
             db_path = os.path.join(os.path.dirname(session['databases']['main']), f"upload_shard_{shard_num}.db")
-            if os.path.exists(db_path):
-                conn_check = sqlite3.connect(db_path)
-                cursor_check = conn_check.cursor()
-                cursor_check.execute('SELECT COUNT(*) FROM credentials')
-                count = cursor_check.fetchone()[0]
-                conn_check.close()
-                print(f"   📊 Shard {shard_num}: {count:,} registros totais")
-
+            conn_check = sqlite3.connect(db_path)
+            cursor_check = conn_check.cursor()
+            cursor_check.execute('SELECT COUNT(*) FROM credentials')
+            count = cursor_check.fetchone()[0]
+            conn_check.close()
+            print(f"   📊 Shard {shard_num}: {count:,} registros totais")
+        
         return total_valid
-
+        
     except Exception as e:
         print(f"✗ Erro no streaming 500MB+: {str(e)[:100]}")
         return 0
@@ -421,23 +361,23 @@ def get_shard_connection(linha_hash: str, ip_hash: str, base_path=None):
     """Cria conexão com shard SQLite baseado em hash da linha para distribuição real"""
     if base_path is None:
         base_path = os.path.join(tempfile.gettempdir(), f"user_{ip_hash}")
-
+    
     # Distribui baseado no hash da linha para distribuição uniforme
     shard_num = int(hashlib.md5(linha_hash.encode()).hexdigest(), 16) % 4
     db_path = os.path.join(base_path, f"upload_shard_{shard_num}.db")
-
+    
     # Cria diretório se não existir
     os.makedirs(base_path, exist_ok=True)
-
+    
     conn = sqlite3.connect(db_path)
-
+    
     # PRAGMA otimizações para performance máxima
     conn.execute("PRAGMA synchronous = OFF")
-    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA journal_mode = WAL") 
     conn.execute("PRAGMA cache_size = 10000")
     conn.execute("PRAGMA temp_store = MEMORY")
     conn.execute("PRAGMA mmap_size = 268435456")  # 256MB
-
+    
     # Cria tabela se não existir
     cursor = conn.cursor()
     cursor.execute('''
@@ -452,36 +392,36 @@ def get_shard_connection(linha_hash: str, ip_hash: str, base_path=None):
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
-
+    
     cursor.execute('''CREATE INDEX IF NOT EXISTS idx_url ON credentials(url)''')
     cursor.execute('''CREATE INDEX IF NOT EXISTS idx_shard ON credentials(shard_id)''')
-
+    
     conn.commit()
     return conn, db_path, shard_num
 
 def batch_insert_credentials_sharded(conn, data_batch, file_source, batch_size=2000):
     """Inserção em lote otimizada para credenciais usando sharding"""
     cursor = conn.cursor()
-
+    
     # Inserção em lote usando executemany
     inserted = 0
     for i in range(0, len(data_batch), batch_size):
         batch = data_batch[i:i + batch_size]
-
+        
         # Prepara dados com file_source
         batch_with_source = [(item[0], item[1], item[2], item[3], file_source) for item in batch]
-
+        
         cursor.executemany('''
         INSERT INTO credentials (url, username, password, linha_completa, file_source)
         VALUES (?, ?, ?, ?, ?)
         ''', batch_with_source)
-
+        
         inserted += len(batch)
-
+        
         # Commit periódico para evitar locks longos
         if i % (batch_size * 5) == 0:
             conn.commit()
-
+    
     conn.commit()
     return inserted
 
@@ -497,23 +437,23 @@ def optimize_sqlite_for_large_uploads(conn):
         "PRAGMA auto_vacuum = 0",
         "PRAGMA secure_delete = 0"
     ]
-
+    
     for pragma in optimizations:
         try:
             conn.execute(pragma)
         except Exception as e:
             print(f"⚠️ PRAGMA falhou: {pragma} - {e}")
-
+    
     return conn
 
 def consolidate_shards(ip_hash, target_db_path):
     """Consolida todos os shards em um banco central"""
     shard_dir = os.path.join(tempfile.gettempdir(), f"user_{ip_hash}")
-
+    
     # Cria banco consolidado
     main_conn = sqlite3.connect(target_db_path)
     optimize_sqlite_for_large_uploads(main_conn)
-
+    
     cursor = main_conn.cursor()
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS credentials (
@@ -526,9 +466,9 @@ def consolidate_shards(ip_hash, target_db_path):
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
-
+    
     total_consolidated = 0
-
+    
     # Consolida cada shard
     for shard_num in range(4):
         shard_path = os.path.join(shard_dir, f"shard_{shard_num}.db")
@@ -536,30 +476,30 @@ def consolidate_shards(ip_hash, target_db_path):
             try:
                 # Anexa shard temporariamente
                 cursor.execute(f"ATTACH DATABASE '{shard_path}' AS shard_{shard_num}")
-
+                
                 # Copia dados do shard
                 cursor.execute(f'''
                 INSERT INTO credentials (url, username, password, linha_completa, file_source, created_at)
-                SELECT url, username, password, linha_completa, file_source, created_at
+                SELECT url, username, password, linha_completa, file_source, created_at 
                 FROM shard_{shard_num}.credentials
                 ''')
-
+                
                 count = cursor.rowcount
                 total_consolidated += count
                 print(f"📦 Shard {shard_num}: {count:,} registros consolidados")
-
+                
                 # Desanexa shard
                 cursor.execute(f"DETACH DATABASE shard_{shard_num}")
-
+                
                 # Remove arquivo shard
                 os.remove(shard_path)
-
+                
             except Exception as e:
                 print(f"⚠️ Erro ao consolidar shard {shard_num}: {e}")
-
+    
     main_conn.commit()
     main_conn.close()
-
+    
     print(f"✅ Consolidação completa: {total_consolidated:,} registros no banco principal")
     return total_consolidated
 
@@ -568,7 +508,7 @@ def schedule_cleanup(ip_hash):
     # Cancela timer anterior se existir
     if ip_hash in CLEANUP_TIMERS:
         CLEANUP_TIMERS[ip_hash].cancel()
-
+    
     def cleanup_ip_data():
         try:
             if ip_hash in IP_SESSIONS:
@@ -578,14 +518,14 @@ def schedule_cleanup(ip_hash):
                     import shutil
                     shutil.rmtree(db_dir)
                     print(f"🗑️ Limpeza automática: SQLites temporários do IP {ip_hash} removidos")
-
+                
                 # Remove da memória
                 del IP_SESSIONS[ip_hash]
                 if ip_hash in CLEANUP_TIMERS:
                     del CLEANUP_TIMERS[ip_hash]
         except Exception as e:
             print(f"✗ Erro na limpeza automática do IP {ip_hash}: {e}")
-
+    
     # Timer de 20 minutos para SQLites temporários (1200 segundos)
     timer = threading.Timer(1200.0, cleanup_ip_data)
     timer.daemon = True
@@ -597,20 +537,20 @@ def update_stats(ip_hash, new_lines_count):
     """Atualiza estatísticas no banco SQLite"""
     if ip_hash not in IP_SESSIONS:
         return
-
+    
     session = IP_SESSIONS[ip_hash]
     session['stats']['total_lines'] += new_lines_count
     session['stats']['valid_lines'] += new_lines_count
-
+    
     # Atualiza no banco
     try:
         conn = sqlite3.connect(session['databases']['stats'])
         cursor = conn.cursor()
         cursor.execute('''
-        UPDATE stats SET
-            total_lines = ?,
-            valid_lines = ?,
-            last_update = CURRENT_TIMESTAMP
+        UPDATE stats SET 
+            total_lines = ?, 
+            valid_lines = ?, 
+            last_update = CURRENT_TIMESTAMP 
         WHERE id = 1
         ''', (session['stats']['total_lines'], session['stats']['valid_lines']))
         conn.commit()
@@ -636,13 +576,13 @@ html_form = """
             --info: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%);
             --danger: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
         }
-
+        
         body {
             background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 25%, #16213e 50%, #0f0f23 75%, #000000 100%);
             min-height: 100vh;
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
         }
-
+        
         .main-header {
             background: var(--primary);
             padding: 2rem 0;
@@ -651,13 +591,13 @@ html_form = """
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
             margin-bottom: 3rem;
         }
-
+        
         .nav-tabs {
             border: none;
             justify-content: center;
             margin-bottom: 2rem;
         }
-
+        
         .nav-tabs .nav-link {
             border: none;
             background: rgba(20, 20, 35, 0.8);
@@ -668,20 +608,20 @@ html_form = """
             transition: all 0.3s ease;
             font-weight: 600;
         }
-
+        
         .nav-tabs .nav-link:hover {
             background: rgba(102, 126, 234, 0.3);
             transform: translateY(-2px);
             box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
         }
-
+        
         .nav-tabs .nav-link.active {
             background: var(--primary);
             color: white;
             transform: translateY(-3px);
             box-shadow: 0 8px 25px rgba(102, 126, 234, 0.5);
         }
-
+        
         .system-card {
             backdrop-filter: blur(15px);
             background: linear-gradient(145deg, rgba(20, 20, 35, 0.9) 0%, rgba(30, 30, 50, 0.8) 100%);
@@ -691,19 +631,19 @@ html_form = """
             transition: all 0.3s ease;
             margin-bottom: 2rem;
         }
-
+        
         .system-card:hover {
             transform: translateY(-5px);
             box-shadow: 0 15px 40px rgba(138, 43, 226, 0.3);
         }
-
+        
         .dashboard-stats {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 1.5rem;
             margin-bottom: 2rem;
         }
-
+        
         .stat-card {
             background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(138, 43, 226, 0.2) 100%);
             padding: 2rem;
@@ -712,12 +652,12 @@ html_form = """
             border: 1px solid rgba(138, 43, 226, 0.3);
             transition: all 0.3s ease;
         }
-
+        
         .stat-card:hover {
             transform: translateY(-3px);
             box-shadow: 0 10px 25px rgba(138, 43, 226, 0.3);
         }
-
+        
         .stat-number {
             font-size: 2.5rem;
             font-weight: 700;
@@ -725,7 +665,7 @@ html_form = """
             margin-bottom: 0.5rem;
             text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
         }
-
+        
         .ip-info {
             background: rgba(138, 43, 226, 0.1);
             padding: 1rem;
@@ -733,7 +673,7 @@ html_form = """
             margin-bottom: 2rem;
             border: 1px solid rgba(138, 43, 226, 0.3);
         }
-
+        
         .auto-cleanup-info {
             background: rgba(255, 193, 7, 0.1);
             padding: 1rem;
@@ -741,14 +681,14 @@ html_form = """
             border: 1px solid rgba(255, 193, 7, 0.3);
             margin-bottom: 2rem;
         }
-
+        
         .menu-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
             gap: 2rem;
             margin: 2rem 0;
         }
-
+        
         .menu-item {
             background: linear-gradient(135deg, rgba(20, 20, 35, 0.8) 0%, rgba(30, 30, 50, 0.8) 100%);
             border: 1px solid rgba(138, 43, 226, 0.3);
@@ -758,12 +698,12 @@ html_form = """
             transition: all 0.3s ease;
             cursor: pointer;
         }
-
+        
         .menu-item:hover {
             transform: translateY(-5px) scale(1.02);
             box-shadow: 0 15px 35px rgba(138, 43, 226, 0.4);
         }
-
+        
         .menu-icon {
             font-size: 3rem;
             margin-bottom: 1rem;
@@ -772,7 +712,7 @@ html_form = """
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
-
+        
         .btn-system {
             border: none;
             border-radius: 12px;
@@ -782,36 +722,36 @@ html_form = """
             transition: all 0.3s ease;
             margin: 0.5rem;
         }
-
+        
         .btn-system:hover {
             transform: translateY(-2px);
             box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
         }
-
+        
         .btn-processing { background: var(--primary); }
         .btn-download { background: var(--success); }
         .btn-filter { background: var(--warning); }
         .btn-convert { background: var(--info); color: #333; }
         .btn-visualize { background: var(--danger); }
-
+        
         .form-control {
             background: rgba(20, 20, 35, 0.8);
             border: 1px solid rgba(138, 43, 226, 0.3);
             border-radius: 12px;
             color: #e0e0e0;
         }
-
+        
         .form-control:focus {
             background: rgba(30, 30, 50, 0.9);
             border-color: #8a2be2;
             box-shadow: 0 0 20px rgba(138, 43, 226, 0.5);
         }
-
+        
         .file-input-wrapper input[type=file] {
             position: absolute;
             left: -9999px;
         }
-
+        
         .file-input-label {
             padding: 15px 20px;
             background: rgba(20, 20, 35, 0.6);
@@ -823,13 +763,13 @@ html_form = """
             transition: all 0.4s ease;
             color: #e0e0e0;
         }
-
+        
         .file-input-label:hover {
             background: rgba(30, 30, 50, 0.8);
             border-color: #8a2be2;
             transform: translateY(-2px);
         }
-
+        
         .tab-content {
             background: rgba(20, 20, 35, 0.6);
             border-radius: 20px;
@@ -837,7 +777,7 @@ html_form = """
             border: 1px solid rgba(138, 43, 226, 0.3);
             backdrop-filter: blur(10px);
         }
-
+        
         .loading-overlay {
             position: fixed;
             top: 0;
@@ -851,7 +791,7 @@ html_form = """
             align-items: center;
             z-index: 9999;
         }
-
+        
         .spinner {
             width: 60px;
             height: 60px;
@@ -861,7 +801,7 @@ html_form = """
             animation: spin 1s linear infinite;
             margin: 0 auto 20px;
         }
-
+        
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
@@ -901,7 +841,7 @@ html_form = """
                 </div>
             </div>
         </div>
-
+        
         <div class="auto-cleanup-info">
             <div class="d-flex align-items-center">
                 <i class="fas fa-clock me-3 text-warning"></i>
@@ -911,7 +851,7 @@ html_form = """
                 </div>
             </div>
         </div></small>
-
+        
         <div class="alert alert-info border-0" style="background: rgba(23, 162, 184, 0.1); border-radius: 10px; border: 1px solid rgba(23, 162, 184, 0.3);">
             <div class="d-flex align-items-center">
                 <i class="fas fa-server me-3"></i>
@@ -968,20 +908,20 @@ html_form = """
             <!-- Dashboard -->
             <div class="tab-pane fade show active" id="dashboard">
                 <h2 class="text-white mb-4"><i class="fas fa-tachometer-alt me-3"></i>Painel de Controle</h2>
-
+                
                 <div class="menu-grid">
                     <div class="menu-item" onclick="switchTab('processing')">
                         <div class="menu-icon"><i class="fas fa-upload"></i></div>
                         <h4 class="text-white">Processamento</h4>
                         <p class="text-muted">Upload e processamento de arquivos TXT, ZIP e RAR</p>
                     </div>
-
+                    
                     <div class="menu-item" onclick="switchTab('downloads')">
                         <div class="menu-icon"><i class="fas fa-download"></i></div>
                         <h4 class="text-white">Downloads</h4>
                         <p class="text-muted">Download completo e filtros especializados</p>
                     </div>
-
+                    
                     <div class="menu-item" onclick="switchTab('settings')">
                         <div class="menu-icon"><i class="fas fa-cog"></i></div>
                         <h4 class="text-white">Configurações</h4>
@@ -1058,7 +998,7 @@ html_form = """
                                     <i class="fas fa-tag me-2"></i>Nome do arquivo final
                                 </label>
                                 <div class="input-group">
-                                    <input type="text" class="form-control" id="filename" name="filename"
+                                    <input type="text" class="form-control" id="filename" name="filename" 
                                            placeholder="resultado_final" value="resultado_final">
                                     <span class="input-group-text bg-transparent" style="border-color: rgba(255,255,255,0.3);">
                                         .txt
@@ -1131,7 +1071,7 @@ html_form = """
                         <div class="row g-3">
                             <div class="col-md-6">
                                 <div class="text-center">
-                                    <a href="/clear-data" class="btn btn-system btn-visualize btn-lg w-100 py-3"
+                                    <a href="/clear-data" class="btn btn-system btn-visualize btn-lg w-100 py-3" 
                                        onclick="return confirm('⚠️ Excluir TODOS os SQLites e dados deste IP?')">
                                         <i class="fas fa-trash-alt me-2"></i>🗑️ Limpar Todos SQLites
                                     </a>
@@ -1147,7 +1087,7 @@ html_form = """
                                 </div>
                             </div>
                         </div>
-
+                        
                         <div id="systemInfo" style="display: none;" class="alert alert-dark border-0 mt-4" style="background: rgba(52, 58, 64, 0.8); border-radius: 15px;">
                             <h5 class="text-light"><i class="fas fa-server me-2"></i>Sistema Multi-SQLite v4.0</h5>
                             <ul class="text-muted mb-0">
@@ -1173,29 +1113,29 @@ html_form = """
     <script>
         function showLoading() {
             document.getElementById('loadingOverlay').style.display = 'flex';
-
+            
             // Simula progresso para uploads grandes
             let progress = 0;
             const progressInterval = setInterval(() => {
                 progress += Math.random() * 5;
                 if (progress > 95) progress = 95;
-
+                
                 const loadingText = document.querySelector('#loadingOverlay div:last-child');
                 loadingText.innerHTML = `🔄 Processando... ${Math.round(progress)}%<br><small>Aguarde para arquivos grandes (500MB+)</small>`;
             }, 2000);
-
+            
             // Para quando a página recarregar
             window.addEventListener('beforeunload', () => {
                 clearInterval(progressInterval);
             });
         }
-
+        
         function switchTab(tabName) {
             const tabElement = document.querySelector('#' + tabName + '-tab');
             const tab = new bootstrap.Tab(tabElement);
             tab.show();
         }
-
+        
         function showSystemInfo() {
             const infoElement = document.getElementById('systemInfo');
             infoElement.style.display = infoElement.style.display === 'none' ? 'block' : 'none';
@@ -1229,22 +1169,22 @@ def extrair_arquivo_comprimido(file):
         file_size = file.tell()
         file.seek(0)  # Volta para o início
         file_size_mb = file_size / (1024 * 1024)
-
+        
         print(f"➤ Extraindo: {file.filename} ({file_size_mb:.1f}MB)")
-
+        
         # Para arquivos gigantes (>500MB), usa processamento ultra-otimizado
         if file_size_mb > 500:
             print(f"🚀 ARQUIVO GIGANTE detectado! Processamento streaming...")
             return processar_arquivo_gigante(file, file_size_mb)
-
+        
         # Para arquivos grandes (>50MB), usa chunks otimizados
         elif file_size_mb > 50:
             print(f"📈 Arquivo grande detectado, processamento em chunks...")
             return extrair_arquivo_grande(file)
-
+        
         # Arquivos pequenos (<50MB) - processamento normal
         return extrair_arquivo_normal(file)
-
+        
     except Exception as e:
         print(f"✗ Erro geral na extração: {str(e)[:50]}")
         return []
@@ -1253,7 +1193,7 @@ def extrair_arquivo_normal(file):
     """Processamento normal para arquivos <50MB"""
     try:
         linhas = []
-
+        
         if file.filename.lower().endswith('.zip'):
             with zipfile.ZipFile(io.BytesIO(file.read()), 'r') as zip_ref:
                 for file_info in zip_ref.filelist:
@@ -1270,10 +1210,10 @@ def extrair_arquivo_normal(file):
             content = file.read().decode('utf-8', errors='ignore')
             linhas.extend(content.splitlines())
             del content
-
+        
         print(f"✓ Extraído: {len(linhas):,} linhas")
         return linhas
-
+        
     except Exception as e:
         print(f"✗ Erro extração normal: {str(e)[:50]}")
         return []
@@ -1285,42 +1225,42 @@ def extrair_arquivo_grande(file):
         file_size = file.tell()
         file.seek(0)
         file_size_mb = file_size / (1024 * 1024)
-
+        
         # Para arquivos 500MB+, força streaming direto
         if file_size_mb >= 500:
             print(f"🚀 FORÇANDO STREAMING DIRETO: {file_size_mb:.1f}MB")
             return "STREAMING_GIGANTE"
-
+        
         # Lê em chunks de 10MB para não explodir a RAM
         chunk_size = 10 * 1024 * 1024  # 10MB chunks
         linhas = []
         buffer = ""
-
+        
         while True:
             chunk = file.read(chunk_size)
             if not chunk:
                 break
-
+                
             # Decodifica chunk
             chunk_text = chunk.decode('utf-8', errors='ignore')
             buffer += chunk_text
-
+            
             # Processa linhas completas
             while '\n' in buffer:
                 linha, buffer = buffer.split('\n', 1)
                 if linha.strip():
                     linhas.append(linha.strip())
-
+            
             # Libera chunk da memória
             del chunk, chunk_text
-
+        
         # Processa última linha se existir
         if buffer.strip():
             linhas.append(buffer.strip())
-
+        
         print(f"✓ Extraído em chunks: {len(linhas):,} linhas")
         return linhas
-
+        
     except Exception as e:
         print(f"✗ Erro extração grande: {str(e)[:50]}")
         return []
@@ -1329,10 +1269,10 @@ def processar_arquivo_gigante(file, file_size_mb):
     """Processamento streaming direto para SQLite (1GB+) sem carregar na RAM"""
     try:
         print(f"🚀 STREAMING DIRETO: {file_size_mb:.1f}MB direto para SQLite")
-
+        
         # Retorna flag especial para processamento direto
         return "STREAMING_GIGANTE"
-
+        
     except Exception as e:
         print(f"✗ Erro processamento gigante: {str(e)[:50]}")
         return []
@@ -1340,56 +1280,56 @@ def processar_arquivo_gigante(file, file_size_mb):
 def linha_valida(linha):
     if not linha or len(linha.strip()) == 0:
         return False
-
+    
     linha = linha.strip()
-
+    
     if linha.startswith('"') and linha.endswith('"'):
         linha = linha[1:-1].strip()
-
+    
     if len(linha) > 200 or len(linha) < 5:
         return False
-
+    
     if any(c in linha for c in ['==', '++', '--', '&&', '||', 'Bearer ', 'Token ', 'JWT']):
         return False
-
+    
     if any(linha.lower().startswith(s) for s in ['android://', 'content://', 'ftp://', 'file://', 'market://']):
         return False
-
+    
     if ':' not in linha:
         return False
-
+    
     partes = linha.split(':')
-
+    
     if linha.startswith('https://') and len(partes) >= 4:
         url = ':'.join(partes[:-2])
         user, password = partes[-2].strip(), partes[-1].strip()
         return bool(url and user and password and '.' in url)
-
+    
     elif linha.startswith('http://') and len(partes) >= 3:
         url = ':'.join(partes[:-2])
         user, password = partes[-2].strip(), partes[-1].strip()
         return bool(url and user and password and '.' in url)
-
+    
     elif len(partes) == 3:
         url, user, password = partes[0].strip(), partes[1].strip(), partes[2].strip()
         return bool(url and user and password and '.' in url and not url.startswith('/') and '//' not in url)
-
+    
     return False
 
 def filtrar_urls_brasileiras(linhas):
     print("➤ Filtrando URLs brasileiras...")
     urls_brasileiras = []
-
-    br_patterns = ['.br', '.com.br', '.org.br', '.gov.br', '.edu.br', 'uol.com', 'globo.com',
+    
+    br_patterns = ['.br', '.com.br', '.org.br', '.gov.br', '.edu.br', 'uol.com', 'globo.com', 
                   'brasil', 'brazil', 'itau', 'bradesco', 'nubank', 'correios', 'detran']
-
+    
     for linha in linhas:
         linha_limpa = linha.strip()
         url_parte = linha_limpa.split(':')[0] if ':' in linha_limpa else linha_limpa
-
+        
         if any(pattern in url_parte.lower() for pattern in br_patterns):
             urls_brasileiras.append(linha_limpa)
-
+    
     print(f"✓ Filtrado: {len(urls_brasileiras)} URLs brasileiras")
     return urls_brasileiras
 
@@ -1398,22 +1338,22 @@ def upload_file():
     user_ip = get_user_ip()
     session = get_user_session(user_ip)
     ip_hash = get_ip_hash(user_ip)
-
+    
     if request.method == "POST":
         try:
             print(f"➤ Processamento iniciado para IP: {ip_hash}")
-
+            
             filename = request.form.get("filename", "resultado_final").strip() or "resultado_final"
-
+            
             arquivos_processados = []
             total_filtradas = 0
-
+            
             for i in range(1, 5):
                 file = request.files.get(f"file{i}")
                 if file and file.filename and file.filename.lower().endswith((".txt", ".rar", ".zip")):
                     try:
                         content = extrair_arquivo_comprimido(file)
-
+                        
                         # Processamento especial para arquivos gigantes
                         if content == "STREAMING_GIGANTE":
                             print(f"🚀 PROCESSAMENTO DIRETO 1GB+: {file.filename}")
@@ -1421,21 +1361,21 @@ def upload_file():
                             total_filtradas += total_valid
                             arquivos_processados.append(f"{file.filename} ({total_valid:,} válidas - STREAMING)")
                             continue
-
+                        
                         if not content:
                             continue
-
+                            
                         print(f"➤ Validando {len(content):,} linhas de {file.filename}...")
-
+                        
                         print(f"🚀 DISTRIBUINDO ENTRE 4 SQLITES para {file.filename} ({len(content):,} linhas)")
-
+                        
                         # Abre conexões para os 4 shards simultaneamente
                         shard_connections = {}
                         for shard_num in range(4):
                             db_path = os.path.join(os.path.dirname(session['databases']['main']), f"upload_shard_{shard_num}.db")
                             conn = sqlite3.connect(db_path)
                             optimize_sqlite_for_large_uploads(conn)
-
+                            
                             # Cria tabela no shard
                             cursor = conn.cursor()
                             cursor.execute('''
@@ -1452,31 +1392,30 @@ def upload_file():
                             ''')
                             cursor.execute('''CREATE INDEX IF NOT EXISTS idx_shard ON credentials(shard_id)''')
                             conn.commit()
-
+                            
                             shard_connections[shard_num] = conn
                             print(f"   📦 Shard {shard_num} preparado: {db_path}")
-
+                        
                         # Conexões auxiliares
                         conn_domains = sqlite3.connect(session['databases']['domains'])
                         conn_br = sqlite3.connect(session['databases']['brazilian'])
-
+                        
                         # Otimiza conexões auxiliares
                         for db_conn in [conn_domains, conn_br]:
                             optimize_sqlite_for_large_uploads(db_conn)
-
+                        
                         # Distribui dados entre os 4 shards
                         shard_batches = {0: [], 1: [], 2: [], 3: []}
-                        br_batch = []
-                        br_count = 0
                         domains_set = set()
+                        br_data = []
                         total_valid = 0
                         batch_size = 1000
-
+                        
                         for i, linha in enumerate(content):
                             linha_limpa = linha.strip()
                             if not linha_limpa or not linha_valida(linha_limpa):
                                 continue
-
+                            
                             try:
                                 partes = linha_limpa.split(':')
                                 if linha_limpa.startswith(('https://', 'http://')):
@@ -1488,15 +1427,13 @@ def upload_file():
                                 # Determina shard baseado no hash da linha
                                 linha_hash = hashlib.md5(linha_limpa.encode()).hexdigest()
                                 shard_num = int(linha_hash, 16) % 4
-
+                                
                                 shard_batches[shard_num].append((url, username, password, linha_limpa, file.filename, shard_num))
-
-                                # Processa URLs brasileiras durante streaming
-                                if any(br in url.lower() for br in ['.br', '.com.br', 'uol.com', 'globo.com', 'brasil', 'itau', 'bradesco', 'nubank']):
-                                    br_batch.append((url, linha_limpa))
-                                    br_count += 1
-
-                                # Processa domínios
+                                
+                                # Dados auxiliares
+                                if any(br in url.lower() for br in ['.br', '.com.br', 'uol.com', 'globo.com', 'brasil']):
+                                    br_data.append((url, linha_limpa))
+                                
                                 try:
                                     if url.startswith(('http://', 'https://')):
                                         domain = urlparse(url).netloc
@@ -1506,14 +1443,14 @@ def upload_file():
                                         domains_set.add(domain)
                                 except:
                                     pass
-
+                                    
                             except:
                                 continue
-
+                            
                             # Processa lotes quando atingir tamanho
                             total_items = sum(len(batch) for batch in shard_batches.values())
                             if total_items >= batch_size * 4:
-
+                                
                                 # Insere em cada shard
                                 for shard_num, batch_data in shard_batches.items():
                                     if batch_data:
@@ -1524,12 +1461,12 @@ def upload_file():
                                         ''', batch_data)
                                         shard_connections[shard_num].commit()
                                         total_valid += len(batch_data)
-
+                                        
                                         print(f"   📊 Shard {shard_num}: +{len(batch_data):,} registros")
-
+                                
                                 # Limpa batches
                                 shard_batches = {0: [], 1: [], 2: [], 3: []}
-
+                        
                         # Processa lotes finais
                         for shard_num, batch_data in shard_batches.items():
                             if batch_data:
@@ -1541,25 +1478,25 @@ def upload_file():
                                 shard_connections[shard_num].commit()
                                 total_valid += len(batch_data)
                                 print(f"   📊 Shard {shard_num} FINAL: +{len(batch_data):,} registros")
-
+                        
                         # Insere dados auxiliares
-                        if br_batch:
+                        if br_data:
                             cursor_br = conn_br.cursor()
-                            cursor_br.executemany('INSERT INTO brazilian_urls (url, linha_completa) VALUES (?, ?)', br_batch)
+                            cursor_br.executemany('INSERT INTO brazilian_urls (url, linha_completa) VALUES (?, ?)', br_data)
                             conn_br.commit()
-
+                        
                         cursor_domains = conn_domains.cursor()
                         for domain in domains_set:
                             cursor_domains.execute('INSERT OR IGNORE INTO domains (domain) VALUES (?)', (domain,))
                             cursor_domains.execute('UPDATE domains SET count = count + 1 WHERE domain = ?', (domain,))
                         conn_domains.commit()
-
+                        
                         # Fecha todas as conexões
                         for conn in shard_connections.values():
                             conn.close()
                         conn_domains.close()
                         conn_br.close()
-
+                        
                         # Exibe distribuição final
                         print(f"🎯 DISTRIBUIÇÃO FINAL:")
                         for shard_num in range(4):
@@ -1571,17 +1508,17 @@ def upload_file():
                                 count = cursor_check.fetchone()[0]
                                 conn_check.close()
                                 print(f"   📦 Shard {shard_num}: {count:,} registros")
-
+                        
                         # NÃO consolidar - manter distribuído nos 4 shards
-
+                        
                         # Libera content da memória
                         del content
-
+                        
                         print(f"   ✅ Total processado: {total_valid:,} válidas")
                         total_filtradas += total_valid
                         taxa = (total_valid / len(content) * 100) if len(content) > 0 else 0
                         arquivos_processados.append(f"{file.filename} ({total_valid:,} válidas)")
-
+                        
                     except MemoryError:
                         print(f"💾 ERRO RAM: {file.filename} - Tentando streaming direto...")
                         total_valid = processar_streaming_direto(file, session, ip_hash)
@@ -1590,10 +1527,10 @@ def upload_file():
                     except Exception as e:
                         print(f"✗ Erro em {file.filename}: {str(e)[:50]}")
                         arquivos_processados.append(f"{file.filename} (erro)")
-
+            
             # Atualiza estatísticas
             update_stats(ip_hash, total_filtradas)
-
+            
             # Conta domínios únicos
             try:
                 conn = sqlite3.connect(session['databases']['domains'])
@@ -1601,14 +1538,14 @@ def upload_file():
                 cursor.execute('SELECT COUNT(*) FROM domains')
                 unique_domains = cursor.fetchone()[0]
                 session['stats']['domains'] = unique_domains
-
+                
                 # Atualiza URLs brasileiras
                 conn_br = sqlite3.connect(session['databases']['brazilian'])
                 cursor_br = conn_br.cursor()
                 cursor_br.execute('SELECT COUNT(*) FROM brazilian_urls')
                 br_count = cursor_br.fetchone()[0]
                 session['stats']['brazilian_urls'] = br_count
-
+                
                 # Atualiza stats no banco
                 conn_stats = sqlite3.connect(session['databases']['stats'])
                 cursor_stats = conn_stats.cursor()
@@ -1621,9 +1558,9 @@ def upload_file():
                 conn.close()
             except:
                 pass
-
+            
             print(f"✓ Processamento concluído para IP {ip_hash}: {total_filtradas} linhas")
-
+            
             if not arquivos_processados:
                 return """
                 <!doctype html>
@@ -1634,7 +1571,7 @@ def upload_file():
                 <h4>❌ Nenhum Arquivo</h4><p>Selecione pelo menos um arquivo válido.</p>
                 </div><a href="/" class="btn btn-secondary">← Voltar</a></div></body></html>
                 """
-
+            
             lista_arquivos = "<br>".join([f"✅ {arq}" for arq in arquivos_processados])
             return f"""
             <!doctype html>
@@ -1665,9 +1602,9 @@ def upload_file():
             <div class="d-grid gap-3 d-md-flex justify-content-md-center">
             <a href="/" class="btn btn-success btn-lg">🏠 Página Principal</a>
             <a href="/download-all-dbs" class="btn btn-outline-light btn-lg">📦 Baixar Todos SQLites</a>
-            </div></div></div></div></div></body></html>
+            </div></div></div></div></div></div></body></html>
             """
-
+            
         except Exception as e:
             print(f"✗ Erro geral no processamento: {str(e)[:100]}")
             return "Erro interno no servidor", 500
@@ -1683,7 +1620,7 @@ def upload_file():
     page_content = page_content.replace('USER_VALID_LINES', f"{stats['valid_lines']:,}")
     page_content = page_content.replace('USER_BRAZILIAN_URLS', f"{stats['brazilian_urls']:,}")
     page_content = page_content.replace('USER_DOMAINS', f"{stats['domains']:,}")
-
+    
     print(f"🌐 Renderizando página para IP real: {user_ip} (Hash: {ip_hash})")
     return page_content
 
@@ -1692,12 +1629,12 @@ def download():
     user_ip = get_user_ip()
     session = get_user_session(user_ip)
     ip_hash = get_ip_hash(user_ip)
-
+    
     try:
         # Coleta dados dos 4 shards distribuídos
         all_lines = []
         shard_counts = []
-
+        
         for shard_num in range(4):
             shard_path = os.path.join(os.path.dirname(session['databases']['main']), f"upload_shard_{shard_num}.db")
             if os.path.exists(shard_path):
@@ -1705,16 +1642,16 @@ def download():
                 cursor = conn.cursor()
                 cursor.execute('SELECT linha_completa FROM credentials ORDER BY id')
                 results = cursor.fetchall()
-
+                
                 shard_lines = [row[0] for row in results]
                 all_lines.extend(shard_lines)
                 shard_counts.append(len(shard_lines))
                 conn.close()
-
+                
                 print(f"   📦 Shard {shard_num}: {len(shard_lines):,} linhas coletadas")
             else:
                 shard_counts.append(0)
-
+        
         # Também verifica main.db para compatibilidade
         try:
             conn = sqlite3.connect(session['databases']['main'])
@@ -1728,26 +1665,29 @@ def download():
             conn.close()
         except:
             pass
-
+        
         if not all_lines:
             return "❌ Nenhuma linha processada nos shards", 404
-
+        
         file_content = "\n".join(all_lines)
-
+        
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as tmp_file:
             tmp_file.write(file_content)
             tmp_path = tmp_file.name
 
+        print(f"✓ Download dos 4 shards preparado: {len(all_lines):,} linhas totais")
+        print(f"   📊 Distribuição: Shard0:{shard_counts[0]:,} | Shard1:{shard_counts[1]:,} | Shard2:{shard_counts[2]:,} | Shard3:{shard_counts[3]:,}")
+        
         def cleanup():
             try:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
             except:
                 pass
-
+        
         threading.Timer(30.0, cleanup).start()
         return send_file(tmp_path, as_attachment=True, download_name=f"resultado_4shards_{ip_hash}.txt")
-
+        
     except Exception as e:
         print(f"✗ Erro no download dos shards: {e}")
         return "❌ Erro ao gerar download", 500
@@ -1757,14 +1697,14 @@ def filter_br():
     user_ip = get_user_ip()
     session = get_user_session(user_ip)
     ip_hash = get_ip_hash(user_ip)
-
+    
     try:
         conn = sqlite3.connect(session['databases']['brazilian'])
         cursor = conn.cursor()
         cursor.execute('SELECT linha_completa FROM brazilian_urls')
         results = cursor.fetchall()
         conn.close()
-
+        
         if not results:
             return f"""
             <!doctype html>
@@ -1780,18 +1720,18 @@ def filter_br():
 
         linhas_br = [row[0] for row in results]
         file_content = "\n".join(linhas_br)
-
+        
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as tmp_file:
             tmp_file.write(file_content)
             tmp_path = tmp_file.name
-
+        
         def cleanup():
             try:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
             except:
                 pass
-
+        
         threading.Timer(30.0, cleanup).start()
         return send_file(tmp_path, as_attachment=True, download_name=f"urls_brasileiras_{ip_hash}.txt")
 
@@ -1804,24 +1744,24 @@ def download_all_dbs():
     user_ip = get_user_ip()
     session = get_user_session(user_ip)
     ip_hash = get_ip_hash(user_ip)
-
+    
     try:
         # Cria ZIP com todos os SQLites incluindo os 4 shards
         zip_path = os.path.join(tempfile.gettempdir(), f"sqlites_{ip_hash}.zip")
-
+        
         with zipfile.ZipFile(zip_path, 'w') as zip_file:
             # SQLites principais
             for db_name, db_path in session['databases'].items():
                 if os.path.exists(db_path):
                     zip_file.write(db_path, f"{db_name}.db")
                     print(f"   📦 Adicionado: {db_name}.db")
-
+            
             # Adiciona os 4 shards de upload
             for shard_num in range(4):
                 shard_path = os.path.join(os.path.dirname(session['databases']['main']), f"upload_shard_{shard_num}.db")
                 if os.path.exists(shard_path):
                     zip_file.write(shard_path, f"upload_shard_{shard_num}.db")
-
+                    
                     # Mostra estatísticas do shard
                     conn = sqlite3.connect(shard_path)
                     cursor = conn.cursor()
@@ -1829,19 +1769,19 @@ def download_all_dbs():
                     count = cursor.fetchone()[0]
                     conn.close()
                     print(f"   📊 Shard {shard_num}: {count:,} registros")
-
+        
         print(f"✓ Pack completo (8 SQLites) criado para IP {ip_hash}")
-
+        
         def cleanup():
             try:
                 if os.path.exists(zip_path):
                     os.remove(zip_path)
             except:
                 pass
-
+        
         threading.Timer(60.0, cleanup).start()
         return send_file(zip_path, as_attachment=True, download_name=f"pack_8sqlites_{ip_hash}.zip")
-
+        
     except Exception as e:
         print(f"✗ Erro ao criar pack SQLites: {e}")
         return "❌ Erro ao criar pack", 500
@@ -1850,35 +1790,35 @@ def download_all_dbs():
 def download_domains():
     user_ip = get_user_ip()
     session = get_user_session(user_ip)
-
+    
     try:
         conn = sqlite3.connect(session['databases']['domains'])
         cursor = conn.cursor()
         cursor.execute('SELECT domain, count FROM domains ORDER BY count DESC')
         results = cursor.fetchall()
         conn.close()
-
+        
         if not results:
             return "❌ Nenhum domínio processado", 404
-
+        
         content = "DOMÍNIO:QUANTIDADE\n"
         for domain, count in results:
             content += f"{domain}:{count}\n"
-
+        
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as tmp_file:
             tmp_file.write(content)
             tmp_path = tmp_file.name
-
+        
         def cleanup():
             try:
                 if os.path.exists(tmp_path):
                     os.remove(tmp_path)
             except:
                 pass
-
+        
         threading.Timer(30.0, cleanup).start()
         return send_file(tmp_path, as_attachment=True, download_name="relatorio_dominios.txt")
-
+        
     except Exception as e:
         print(f"✗ Erro no relatório de domínios: {e}")
         return "❌ Erro ao gerar relatório", 500
@@ -1887,7 +1827,7 @@ def download_domains():
 def clear_data():
     user_ip = get_user_ip()
     ip_hash = get_ip_hash(user_ip)
-
+    
     try:
         # Remove todos os bancos SQLite do IP
         if ip_hash in IP_SESSIONS:
@@ -1895,17 +1835,17 @@ def clear_data():
             if os.path.exists(db_dir):
                 import shutil
                 shutil.rmtree(db_dir)
-
+            
             # Cancela timer de limpeza
             if ip_hash in CLEANUP_TIMERS:
                 CLEANUP_TIMERS[ip_hash].cancel()
                 del CLEANUP_TIMERS[ip_hash]
-
+            
             # Remove da memória
             del IP_SESSIONS[ip_hash]
-
+        
         print(f"✓ Limpeza manual realizada para IP {ip_hash}")
-
+        
         return f"""
         <!doctype html>
         <html lang="pt-BR" data-bs-theme="dark">
@@ -1924,7 +1864,7 @@ def clear_data():
         <a href="/" class="btn btn-success btn-lg">🏠 Reiniciar Sistema</a>
         </div></div></div></body></html>
         """
-
+        
     except Exception as e:
         print(f"✗ Erro na limpeza: {e}")
         return "❌ Erro ao limpar dados", 500
@@ -1936,30 +1876,30 @@ def cleanup_inactive_ips():
         try:
             now = datetime.now()
             inactive_ips = []
-
+            
             for ip_hash, session_data in IP_SESSIONS.items():
                 if now - session_data['last_activity'] > timedelta(minutes=30):
                     inactive_ips.append(ip_hash)
-
+            
             for ip_hash in inactive_ips:
                 try:
                     db_dir = os.path.dirname(IP_SESSIONS[ip_hash]['databases']['main'])
                     if os.path.exists(db_dir):
                         import shutil
                         shutil.rmtree(db_dir)
-
+                    
                     if ip_hash in CLEANUP_TIMERS:
                         CLEANUP_TIMERS[ip_hash].cancel()
                         del CLEANUP_TIMERS[ip_hash]
-
+                    
                     del IP_SESSIONS[ip_hash]
                     print(f"✓ Limpeza automática: IP {ip_hash} removido por inatividade")
                 except:
                     pass
-
+                    
         except:
             pass
-
+        
         time.sleep(600)  # Verifica a cada 10 minutos
 
 # Inicia thread de limpeza
