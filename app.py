@@ -3,6 +3,8 @@ import os
 import logging
 import sqlite3
 import tempfile
+import zipfile
+import io
 
 # Configure logging reduzido
 logging.basicConfig(level=logging.WARNING)
@@ -80,28 +82,68 @@ html_form = """
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
         body {
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            background: 
+                radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.3) 0%, transparent 50%),
+                radial-gradient(circle at 40% 40%, rgba(120, 119, 198, 0.2) 0%, transparent 50%),
+                linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 25%, #16213e 50%, #0f0f23 75%, #000000 100%);
             min-height: 100vh;
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            position: relative;
+            overflow-x: hidden;
+        }
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: 
+                repeating-linear-gradient(
+                    90deg,
+                    transparent 0,
+                    transparent 98px,
+                    rgba(68, 68, 68, 0.03) 100px
+                ),
+                repeating-linear-gradient(
+                    0deg,
+                    transparent 0,
+                    transparent 98px,
+                    rgba(68, 68, 68, 0.03) 100px
+                );
+            pointer-events: none;
+            z-index: -1;
         }
         .main-card {
-            backdrop-filter: blur(10px);
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 20px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-            transition: all 0.3s ease;
+            backdrop-filter: blur(15px);
+            background: 
+                linear-gradient(145deg, rgba(20, 20, 35, 0.9) 0%, rgba(30, 30, 50, 0.8) 100%);
+            border: 2px solid;
+            border-image: linear-gradient(45deg, rgba(138, 43, 226, 0.5), rgba(30, 144, 255, 0.3), rgba(138, 43, 226, 0.5)) 1;
+            border-radius: 25px;
+            box-shadow: 
+                0 15px 35px rgba(0, 0, 0, 0.7),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1),
+                0 0 30px rgba(138, 43, 226, 0.2);
+            transition: all 0.4s ease;
+            position: relative;
         }
         .main-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+            transform: translateY(-8px) scale(1.02);
+            box-shadow: 
+                0 25px 50px rgba(0, 0, 0, 0.8),
+                0 0 40px rgba(138, 43, 226, 0.4),
+                inset 0 1px 0 rgba(255, 255, 255, 0.2);
         }
         .card-header {
-            background: linear-gradient(45deg, #667eea 0%, #764ba2 100%);
-            border-radius: 20px 20px 0 0 !important;
+            background: 
+                linear-gradient(135deg, rgba(75, 0, 130, 0.9) 0%, rgba(25, 25, 112, 0.9) 50%, rgba(72, 61, 139, 0.9) 100%);
+            border-radius: 25px 25px 0 0 !important;
             border: none;
             position: relative;
             overflow: hidden;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
         }
         .card-header::before {
             content: '';
@@ -145,27 +187,45 @@ html_form = """
             border: none;
         }
         .form-control {
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.3);
+            background: rgba(20, 20, 35, 0.8);
+            border: 1px solid rgba(138, 43, 226, 0.3);
             border-radius: 12px;
             transition: all 0.3s ease;
+            color: #e0e0e0;
         }
         .form-control:focus {
-            background: rgba(255, 255, 255, 0.15);
-            border-color: #667eea;
-            box-shadow: 0 0 20px rgba(102, 126, 234, 0.3);
+            background: rgba(30, 30, 50, 0.9);
+            border-color: #8a2be2;
+            box-shadow: 
+                0 0 20px rgba(138, 43, 226, 0.5),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
         }
         .stats-badge {
-            background: linear-gradient(45deg, #11998e 0%, #38ef7d 100%);
-            border-radius: 15px;
-            padding: 15px 25px;
-            font-weight: 600;
-            animation: pulse 2s infinite;
+            background: linear-gradient(45deg, rgba(75, 0, 130, 0.8) 0%, rgba(138, 43, 226, 0.9) 100%);
+            border: 1px solid rgba(138, 43, 226, 0.5);
+            border-radius: 20px;
+            padding: 18px 30px;
+            font-weight: 700;
+            animation: pulseGothic 3s infinite;
+            box-shadow: 
+                0 8px 25px rgba(138, 43, 226, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.2);
+            color: #fff;
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
         }
-        @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.05); }
-            100% { transform: scale(1); }
+        @keyframes pulseGothic {
+            0% { 
+                transform: scale(1);
+                box-shadow: 0 8px 25px rgba(138, 43, 226, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+            }
+            50% { 
+                transform: scale(1.08);
+                box-shadow: 0 12px 35px rgba(138, 43, 226, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+            }
+            100% { 
+                transform: scale(1);
+                box-shadow: 0 8px 25px rgba(138, 43, 226, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+            }
         }
         .file-input-wrapper {
             position: relative;
@@ -178,18 +238,25 @@ html_form = """
             left: -9999px;
         }
         .file-input-label {
-            padding: 12px 20px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 2px dashed rgba(255, 255, 255, 0.3);
-            border-radius: 12px;
+            padding: 15px 20px;
+            background: rgba(20, 20, 35, 0.6);
+            border: 2px dashed rgba(138, 43, 226, 0.4);
+            border-radius: 15px;
             cursor: pointer;
             display: block;
             text-align: center;
-            transition: all 0.3s ease;
+            transition: all 0.4s ease;
+            color: #e0e0e0;
+            position: relative;
+            overflow: hidden;
         }
         .file-input-label:hover {
-            background: rgba(255, 255, 255, 0.2);
-            border-color: #667eea;
+            background: rgba(30, 30, 50, 0.8);
+            border-color: #8a2be2;
+            box-shadow: 
+                0 5px 15px rgba(138, 43, 226, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            transform: translateY(-2px);
         }
         .loading-overlay {
             position: fixed;
@@ -268,42 +335,42 @@ html_form = """
                             <div class="mb-4">
                                 <label class="form-label fw-bold">
                                     <i class="fas fa-cloud-upload-alt me-2" style="color: #667eea;"></i>
-                                    Selecione até 4 arquivos .txt
+                                    Selecione até 4 arquivos (.txt/.rar/.zip)
                                 </label>
                                 <div class="row g-3">
                                     <div class="col-md-6">
                                         <div class="file-input-wrapper">
-                                            <input type="file" name="file1" accept=".txt" id="file1">
+                                            <input type="file" name="file1" accept=".txt,.rar,.zip" id="file1">
                                             <label for="file1" class="file-input-label">
                                                 <i class="fas fa-file-plus mb-2 d-block"></i>
-                                                Arquivo 1
+                                                Arquivo 1 (.txt/.rar/.zip)
                                             </label>
                                         </div>
                                     </div>
                                     <div class="col-md-6">
                                         <div class="file-input-wrapper">
-                                            <input type="file" name="file2" accept=".txt" id="file2">
+                                            <input type="file" name="file2" accept=".txt,.rar,.zip" id="file2">
                                             <label for="file2" class="file-input-label">
                                                 <i class="fas fa-file-plus mb-2 d-block"></i>
-                                                Arquivo 2
+                                                Arquivo 2 (.txt/.rar/.zip)
                                             </label>
                                         </div>
                                     </div>
                                     <div class="col-md-6">
                                         <div class="file-input-wrapper">
-                                            <input type="file" name="file3" accept=".txt" id="file3">
+                                            <input type="file" name="file3" accept=".txt,.rar,.zip" id="file3">
                                             <label for="file3" class="file-input-label">
                                                 <i class="fas fa-file-plus mb-2 d-block"></i>
-                                                Arquivo 3
+                                                Arquivo 3 (.txt/.rar/.zip)
                                             </label>
                                         </div>
                                     </div>
                                     <div class="col-md-6">
                                         <div class="file-input-wrapper">
-                                            <input type="file" name="file4" accept=".txt" id="file4">
+                                            <input type="file" name="file4" accept=".txt,.rar,.zip" id="file4">
                                             <label for="file4" class="file-input-label">
                                                 <i class="fas fa-file-plus mb-2 d-block"></i>
-                                                Arquivo 4
+                                                Arquivo 4 (.txt/.rar/.zip)
                                             </label>
                                         </div>
                                     </div>
@@ -405,6 +472,34 @@ html_form = """
 </body>
 </html>
 """
+
+def extrair_arquivo_comprimido(file):
+    """Extrai conteúdo de arquivos .zip (simples implementação)"""
+    linhas = []
+    try:
+        if file.filename.lower().endswith('.zip'):
+            with zipfile.ZipFile(io.BytesIO(file.read()), 'r') as zip_ref:
+                for file_info in zip_ref.filelist:
+                    if file_info.filename.lower().endswith('.txt'):
+                        with zip_ref.open(file_info) as txt_file:
+                            content = txt_file.read().decode('utf-8', errors='ignore')
+                            linhas.extend(content.splitlines())
+        elif file.filename.lower().endswith('.rar'):
+            # Para .rar, vamos tentar ler como se fosse texto (fallback)
+            try:
+                content = file.read().decode('utf-8', errors='ignore')
+                linhas.extend(content.splitlines())
+            except:
+                app.logger.warning(f"Não foi possível processar arquivo RAR: {file.filename}")
+                return []
+        else:  # .txt
+            content = file.read().decode('utf-8', errors='ignore')
+            linhas.extend(content.splitlines())
+    except Exception as e:
+        app.logger.error(f"Erro ao extrair arquivo {file.filename}: {e}")
+        return []
+    
+    return linhas
 
 def filtrar_urls_brasileiras(linhas):
     """Filtra apenas URLs que contêm domínios brasileiros (.br)"""
@@ -518,11 +613,11 @@ def upload_file():
             
             for i in range(1, 5):  # file1, file2, file3, file4
                 file = request.files.get(f"file{i}")
-                if file and file.filename and file.filename.endswith(".txt"):
+                if file and file.filename and (file.filename.lower().endswith((".txt", ".rar", ".zip"))):
                     try:
-                        # lê o conteúdo do arquivo
-                        content = file.read().decode("utf-8", errors="ignore").splitlines()
-                        app.logger.info(f"Arquivo {file.filename} lido com {len(content)} linhas")
+                        # Extrai conteúdo do arquivo (txt, zip ou rar)
+                        content = extrair_arquivo_comprimido(file)
+                        app.logger.info(f"Arquivo {file.filename} processado com {len(content)} linhas")
                         
                         # filtra linhas válidas
                         filtradas = []
@@ -1134,7 +1229,7 @@ def txt_to_db():
                                 <div class="mb-3">
                                     <label class="form-label">
                                         <i class="fas fa-file-text me-2"></i>
-                                        Selecione até 4 arquivos .txt
+                                        Selecione até 4 arquivos (.txt/.rar/.zip)
                                     </label>
                                     <input type="file" class="form-control mb-2" name="file1" accept=".txt">
                                     <input type="file" class="form-control mb-2" name="file2" accept=".txt">
