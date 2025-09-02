@@ -1,5 +1,5 @@
 
-from flask import Flask, request, render_template_string, send_file
+from flask import Flask, request, render_template_string, send_file, Response
 import os
 import logging
 import sqlite3
@@ -10,6 +10,7 @@ import re
 import threading
 import time
 import hashlib
+import json
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
 
@@ -23,6 +24,7 @@ app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret-key-change-in-prod
 # Sistema de sessões por IP com SQLite
 IP_SESSIONS = {}
 CLEANUP_TIMERS = {}
+PROGRESS_DATA = {}  # Armazena progresso por IP
 
 def get_user_ip():
     """Obtém IP real do usuário de forma mais precisa"""
@@ -216,6 +218,15 @@ def processar_streaming_direto(file, session, ip_hash):
         
         print("🔥 MODO STREAMING: Processando direto para SQLite...")
         
+        # Estima total de linhas baseado no tamanho do arquivo
+        file.seek(0, 2)  # Vai para o final
+        file_size = file.tell()
+        file.seek(0)  # Volta para o início
+        estimated_lines = file_size // 50  # Estimativa: ~50 bytes por linha
+        
+        # Inicializa progresso
+        update_progress(ip_hash, 0, estimated_lines, file.filename, "streaming")
+        
         # Conexões SQLite otimizadas para streaming
         conn = sqlite3.connect(session['databases']['main'])
         conn_domains = sqlite3.connect(session['databases']['domains'])
@@ -236,6 +247,7 @@ def processar_streaming_direto(file, session, ip_hash):
         
         batch_data = []
         batch_count = 0
+        lines_processed = 0
         
         while True:
             # Lê chunk minúsculo
@@ -254,6 +266,12 @@ def processar_streaming_direto(file, session, ip_hash):
             while '\n' in linha_buffer:
                 linha, linha_buffer = linha_buffer.split('\n', 1)
                 linha_limpa = linha.strip()
+                lines_processed += 1
+                
+                # Atualiza progresso a cada 30k linhas
+                if lines_processed % 30000 == 0:
+                    update_progress(ip_hash, lines_processed, estimated_lines, file.filename, "streaming")
+                    print(f"   📊 STREAMING: {lines_processed:,} linhas processadas ({total_valid:,} válidas)")
                 
                 if not linha_limpa or not linha_valida(linha_limpa):
                     continue
@@ -297,7 +315,6 @@ def processar_streaming_direto(file, session, ip_hash):
                             for db in [conn, conn_domains, conn_br]:
                                 db.commit()
                                 db.execute('BEGIN TRANSACTION')
-                            print(f"   🚀 STREAM: {total_valid:,} processadas...")
                             
                 except:
                     continue
@@ -309,6 +326,9 @@ def processar_streaming_direto(file, session, ip_hash):
         if batch_data:
             cursor.executemany('INSERT INTO credentials (url, username, password, linha_completa) VALUES (?, ?, ?, ?)', batch_data)
             total_valid += len(batch_data)
+        
+        # Marca streaming como completo
+        update_progress(ip_hash, lines_processed, lines_processed, file.filename, "completed")
         
         # Commit final
         for db in [conn, conn_domains, conn_br]:
@@ -354,6 +374,17 @@ def schedule_cleanup(ip_hash):
     timer.start()
     CLEANUP_TIMERS[ip_hash] = timer
     print(f"⏰ Timer de limpeza agendado para IP {ip_hash} em 20 minutos")
+
+def update_progress(ip_hash, processed_lines, total_lines, current_file="", status="processing"):
+    """Atualiza progresso em tempo real"""
+    PROGRESS_DATA[ip_hash] = {
+        'processed': processed_lines,
+        'total': total_lines,
+        'percentage': round((processed_lines / total_lines * 100), 1) if total_lines > 0 else 0,
+        'current_file': current_file,
+        'status': status,
+        'timestamp': time.time()
+    }
 
 def update_stats(ip_hash, new_lines_count):
     """Atualiza estatísticas no banco SQLite"""
@@ -606,12 +637,52 @@ html_form = """
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0, 0, 0, 0.8);
-            backdrop-filter: blur(5px);
+            background: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(10px);
             display: none;
             justify-content: center;
             align-items: center;
             z-index: 9999;
+        }
+        
+        .progress-container {
+            text-align: center;
+            color: white;
+            background: rgba(20, 20, 35, 0.9);
+            padding: 3rem;
+            border-radius: 20px;
+            border: 1px solid rgba(138, 43, 226, 0.5);
+            backdrop-filter: blur(15px);
+            min-width: 400px;
+        }
+        
+        .progress-bar-container {
+            width: 100%;
+            height: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 20px 0;
+            position: relative;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.5s ease;
+            border-radius: 10px;
+        }
+        
+        .progress-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-weight: bold;
+            font-size: 12px;
+            color: white;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
         }
         
         .spinner {
@@ -624,6 +695,20 @@ html_form = """
             margin: 0 auto 20px;
         }
         
+        .progress-details {
+            font-size: 14px;
+            color: #b0b0b0;
+            margin-top: 15px;
+        }
+        
+        .file-progress {
+            background: rgba(138, 43, 226, 0.2);
+            padding: 10px;
+            border-radius: 10px;
+            margin: 10px 0;
+            border: 1px solid rgba(138, 43, 226, 0.3);
+        }
+        
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
@@ -632,9 +717,23 @@ html_form = """
 </head>
 <body>
     <div class="loading-overlay" id="loadingOverlay">
-        <div style="text-align: center; color: white;">
+        <div class="progress-container">
             <div class="spinner"></div>
-            <div style="font-size: 18px;">🔄 Processando...</div>
+            <h3 style="margin-bottom: 20px;">🔄 Processando Arquivos</h3>
+            
+            <div class="progress-bar-container">
+                <div class="progress-bar" id="progressBar"></div>
+                <div class="progress-text" id="progressText">0%</div>
+            </div>
+            
+            <div class="file-progress">
+                <div id="currentFile">Preparando...</div>
+                <div id="processedLines">0 linhas processadas</div>
+            </div>
+            
+            <div class="progress-details">
+                <div id="progressStatus">Iniciando processamento...</div>
+            </div>
         </div>
     </div>
 
@@ -928,8 +1027,75 @@ html_form = """
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        let progressEventSource = null;
+        
         function showLoading() {
             document.getElementById('loadingOverlay').style.display = 'flex';
+            
+            // Inicia tracking de progresso via SSE
+            const ipHash = 'USER_IP_HASH';
+            progressEventSource = new EventSource(`/progress/${ipHash}`);
+            
+            progressEventSource.onmessage = function(event) {
+                try {
+                    const progress = JSON.parse(event.data);
+                    updateProgressUI(progress);
+                } catch (e) {
+                    console.error('Erro ao processar progresso:', e);
+                }
+            };
+            
+            progressEventSource.onerror = function(event) {
+                console.log('Erro SSE:', event);
+            };
+        }
+        
+        function updateProgressUI(progress) {
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            const currentFile = document.getElementById('currentFile');
+            const processedLines = document.getElementById('processedLines');
+            const progressStatus = document.getElementById('progressStatus');
+            
+            // Atualiza barra de progresso
+            progressBar.style.width = progress.percentage + '%';
+            progressText.textContent = progress.percentage + '%';
+            
+            // Atualiza informações do arquivo
+            if (progress.current_file) {
+                currentFile.innerHTML = `📄 <strong>${progress.current_file}</strong>`;
+            }
+            
+            // Atualiza linhas processadas (formatado com vírgulas)
+            const formattedLines = progress.processed.toLocaleString('pt-BR');
+            const formattedTotal = progress.total.toLocaleString('pt-BR');
+            processedLines.innerHTML = `📊 <strong>${formattedLines}</strong> de <strong>${formattedTotal}</strong> linhas`;
+            
+            // Atualiza status baseado no progresso
+            if (progress.status === 'streaming') {
+                progressStatus.innerHTML = '🚀 <strong>MODO STREAMING</strong> - Processamento direto para SQLite';
+            } else if (progress.status === 'processing') {
+                progressStatus.innerHTML = '⚡ <strong>PROCESSANDO</strong> - Validando e salvando dados';
+            } else if (progress.status === 'completed') {
+                progressStatus.innerHTML = '✅ <strong>CONCLUÍDO!</strong> - Redirecionando...';
+                
+                // Para o EventSource e redireciona após 2 segundos
+                if (progressEventSource) {
+                    progressEventSource.close();
+                    progressEventSource = null;
+                }
+                
+                setTimeout(() => {
+                    window.location.reload();
+                }, 2000);
+            } else {
+                progressStatus.innerHTML = '⏳ <strong>AGUARDANDO</strong> - Preparando arquivos...';
+            }
+            
+            // Aviso especial a cada 30k linhas
+            if (progress.processed > 0 && progress.processed % 30000 === 0) {
+                console.log(`🎯 MARCO: ${progress.processed.toLocaleString('pt-BR')} linhas processadas!`);
+            }
         }
         
         function switchTab(tabName) {
@@ -1127,6 +1293,31 @@ def filtrar_urls_brasileiras(linhas):
     print(f"✓ Filtrado: {len(urls_brasileiras)} URLs brasileiras")
     return urls_brasileiras
 
+@app.route("/progress/<ip_hash>")
+def progress_stream(ip_hash):
+    """Stream de progresso em tempo real via Server-Sent Events"""
+    def generate():
+        while True:
+            if ip_hash in PROGRESS_DATA:
+                progress = PROGRESS_DATA[ip_hash]
+                data = json.dumps(progress)
+                yield f"data: {data}\n\n"
+                
+                # Para quando completo
+                if progress['status'] == 'completed':
+                    break
+            else:
+                # Se não há progresso, envia status inicial
+                yield f"data: {json.dumps({'processed': 0, 'total': 0, 'percentage': 0, 'status': 'waiting'})}\n\n"
+            
+            time.sleep(1)  # Atualiza a cada segundo
+    
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no'
+    })
+
 @app.route("/", methods=["GET", "POST"])
 def upload_file():
     user_ip = get_user_ip()
@@ -1164,6 +1355,9 @@ def upload_file():
                             continue
                             
                         print(f"➤ Validando {len(content):,} linhas de {file.filename}...")
+                        
+                        # Inicializa progresso
+                        update_progress(ip_hash, 0, len(content), file.filename, "processing")
                         
                         # Processamento ultra-otimizado para RAM limitada
                         batch_size = 1000  # Chunks menores para 1GB
@@ -1238,13 +1432,19 @@ def upload_file():
                                 cursor_domains.execute('UPDATE domains SET count = count + 1 WHERE domain = ?', (domain,))
                             
                             total_valid += len(batch_data)
+                            lines_processed = i + len(batch)
+                            
+                            # Atualiza progresso a cada 30k linhas
+                            if lines_processed % 30000 == 0 or (lines_processed - batch_size) // 30000 != lines_processed // 30000:
+                                update_progress(ip_hash, lines_processed, len(content), file.filename, "processing")
+                                print(f"   📊 PROGRESSO: {lines_processed:,}/{len(content):,} linhas ({total_valid:,} válidas)")
                             
                             # Commit mais frequente para arquivos grandes
                             if i % (batch_size * 5) == 0:  # A cada 5k linhas
                                 conn.commit()
                                 conn_domains.commit()
                                 conn_br.commit()
-                                print(f"   💾 Salvo: {i + len(batch):,}/{len(content):,} ({total_valid:,} válidas)")
+                                print(f"   💾 Salvo: {lines_processed:,}/{len(content):,} ({total_valid:,} válidas)")
                             
                             # Limpa memória imediatamente
                             del batch_data, domains_set, br_data, batch
@@ -1260,6 +1460,9 @@ def upload_file():
                         # Libera content da memória
                         del content
                         
+                        # Marca como concluído
+                        update_progress(ip_hash, len(content), len(content), file.filename, "completed")
+                        
                         print(f"   ✅ Total processado: {total_valid:,} válidas")
                         total_filtradas += total_valid
                         taxa = (total_valid / len(content) * 100) if len(content) > 0 else 0
@@ -1273,6 +1476,9 @@ def upload_file():
                     except Exception as e:
                         print(f"✗ Erro em {file.filename}: {str(e)[:50]}")
                         arquivos_processados.append(f"{file.filename} (erro)")
+            
+            # Marca processamento como completo
+            update_progress(ip_hash, 0, 0, "", "completed")
             
             # Atualiza estatísticas
             update_stats(ip_hash, total_filtradas)
