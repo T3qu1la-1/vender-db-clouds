@@ -214,7 +214,7 @@ def processar_streaming_direto(file, session, ip_hash):
         file.seek(0)
         total_valid = 0
         linha_buffer = ""
-        chunk_size = 8192  # 8KB chunks muito pequenos
+        chunk_size = 4096  # 4KB chunks menores para economizar RAM
         
         print("🔥 MODO STREAMING: Processando direto para SQLite...")
         
@@ -224,6 +224,8 @@ def processar_streaming_direto(file, session, ip_hash):
         file.seek(0)  # Volta para o início
         estimated_lines = file_size // 50  # Estimativa: ~50 bytes por linha
         
+        print(f"📊 Arquivo: {file_size / (1024*1024):.1f}MB, ~{estimated_lines:,} linhas estimadas")
+        
         # Inicializa progresso
         update_progress(ip_hash, 0, estimated_lines, file.filename, "streaming")
         
@@ -232,25 +234,31 @@ def processar_streaming_direto(file, session, ip_hash):
         conn_domains = sqlite3.connect(session['databases']['domains'])
         conn_br = sqlite3.connect(session['databases']['brazilian'])
         
-        # Configuração máxima performance para 1GB+
+        # Configuração ultra performance para 1GB+
         for db in [conn, conn_domains, conn_br]:
-            db.execute('PRAGMA journal_mode=OFF')
-            db.execute('PRAGMA synchronous=OFF')
-            db.execute('PRAGMA cache_size=100000')  # 100MB cache
+            db.execute('PRAGMA journal_mode=MEMORY')  # Mais seguro que OFF
+            db.execute('PRAGMA synchronous=NORMAL')   # Compromisso segurança/velocidade
+            db.execute('PRAGMA cache_size=50000')     # 50MB cache
             db.execute('PRAGMA temp_store=MEMORY')
-            db.execute('PRAGMA mmap_size=1073741824')  # 1GB mmap
-            db.execute('BEGIN TRANSACTION')
+            db.execute('PRAGMA mmap_size=268435456')  # 256MB mmap
         
         cursor = conn.cursor()
         cursor_domains = conn_domains.cursor()
         cursor_br = conn_br.cursor()
         
+        # Begin transaction para performance
+        conn.execute('BEGIN TRANSACTION')
+        conn_domains.execute('BEGIN TRANSACTION')
+        conn_br.execute('BEGIN TRANSACTION')
+        
         batch_data = []
-        batch_count = 0
+        batch_domains = set()
+        batch_br = []
         lines_processed = 0
+        commit_counter = 0
         
         while True:
-            # Lê chunk minúsculo
+            # Lê chunk pequeno
             chunk = file.read(chunk_size)
             if not chunk:
                 break
@@ -262,7 +270,7 @@ def processar_streaming_direto(file, session, ip_hash):
                 
             linha_buffer += chunk_text
             
-            # Processa linhas completas uma por uma
+            # Processa linhas completas linha por linha
             while '\n' in linha_buffer:
                 linha, linha_buffer = linha_buffer.split('\n', 1)
                 linha_limpa = linha.strip()
@@ -270,8 +278,9 @@ def processar_streaming_direto(file, session, ip_hash):
                 
                 # Atualiza progresso a cada 30k linhas
                 if lines_processed % 30000 == 0:
+                    percentage = round((lines_processed / estimated_lines * 100), 1) if estimated_lines > 0 else 0
                     update_progress(ip_hash, lines_processed, estimated_lines, file.filename, "streaming")
-                    print(f"   📊 STREAMING: {lines_processed:,} linhas processadas ({total_valid:,} válidas)")
+                    print(f"   📊 STREAMING: {lines_processed:,} linhas processadas ({total_valid:,} válidas) - {percentage}%")
                 
                 if not linha_limpa or not linha_valida(linha_limpa):
                     continue
@@ -284,62 +293,92 @@ def processar_streaming_direto(file, session, ip_hash):
                     else:
                         url, username, password = partes[0], partes[1], partes[2]
                     
+                    # Adiciona aos batches
                     batch_data.append((url, username, password, linha_limpa))
                     
                     # Checa brasileiro
-                    if any(br in url.lower() for br in ['.br', '.com.br', 'uol.com', 'globo.com']):
-                        cursor_br.execute('INSERT INTO brazilian_urls (url, linha_completa) VALUES (?, ?)', (url, linha_limpa))
+                    if any(br in url.lower() for br in ['.br', '.com.br', 'uol.com', 'globo.com', 'brasil']):
+                        batch_br.append((url, linha_limpa))
                     
-                    # Domínio
+                    # Extrai domínio
                     try:
                         if url.startswith(('http://', 'https://')):
                             domain = urlparse(url).netloc
                         else:
                             domain = url.split('/')[0]
                         if domain:
-                            cursor_domains.execute('INSERT OR IGNORE INTO domains (domain) VALUES (?)', (domain,))
-                            cursor_domains.execute('UPDATE domains SET count = count + 1 WHERE domain = ?', (domain,))
+                            batch_domains.add(domain)
                     except:
                         pass
                         
-                    batch_count += 1
-                    
-                    # Insert micro-batch a cada 100 linhas para não acumular RAM
-                    if len(batch_data) >= 100:
+                    # Insert micro-batch a cada 50 linhas para economizar RAM
+                    if len(batch_data) >= 50:
                         cursor.executemany('INSERT INTO credentials (url, username, password, linha_completa) VALUES (?, ?, ?, ?)', batch_data)
                         total_valid += len(batch_data)
-                        batch_data.clear()  # Limpa imediatamente
                         
-                        # Commit frequente para streaming
-                        if batch_count % 10000 == 0:
-                            for db in [conn, conn_domains, conn_br]:
-                                db.commit()
-                                db.execute('BEGIN TRANSACTION')
+                        # Insert domínios
+                        for domain in batch_domains:
+                            cursor_domains.execute('INSERT OR IGNORE INTO domains (domain) VALUES (?)', (domain,))
+                            cursor_domains.execute('UPDATE domains SET count = count + 1 WHERE domain = ?', (domain,))
+                        
+                        # Insert brasileiros
+                        if batch_br:
+                            cursor_br.executemany('INSERT INTO brazilian_urls (url, linha_completa) VALUES (?, ?)', batch_br)
+                        
+                        # Limpa batches da memória
+                        batch_data.clear()
+                        batch_domains.clear()
+                        batch_br.clear()
+                        
+                        commit_counter += 50
+                        
+                        # Commit a cada 5000 linhas válidas
+                        if commit_counter >= 5000:
+                            conn.commit()
+                            conn_domains.commit()
+                            conn_br.commit()
+                            conn.execute('BEGIN TRANSACTION')
+                            conn_domains.execute('BEGIN TRANSACTION')
+                            conn_br.execute('BEGIN TRANSACTION')
+                            commit_counter = 0
                             
-                except:
+                except Exception as e:
                     continue
             
-            # Libera chunk imediatamente
-            del chunk, chunk_text
+            # Libera chunk da memória imediatamente
+            del chunk
+            if 'chunk_text' in locals():
+                del chunk_text
         
-        # Insert final do batch restante
+        # Insert final dos batches restantes
         if batch_data:
             cursor.executemany('INSERT INTO credentials (url, username, password, linha_completa) VALUES (?, ?, ?, ?)', batch_data)
             total_valid += len(batch_data)
+        
+        if batch_domains:
+            for domain in batch_domains:
+                cursor_domains.execute('INSERT OR IGNORE INTO domains (domain) VALUES (?)', (domain,))
+                cursor_domains.execute('UPDATE domains SET count = count + 1 WHERE domain = ?', (domain,))
+        
+        if batch_br:
+            cursor_br.executemany('INSERT INTO brazilian_urls (url, linha_completa) VALUES (?, ?)', batch_br)
         
         # Marca streaming como completo
         update_progress(ip_hash, lines_processed, lines_processed, file.filename, "completed")
         
         # Commit final
-        for db in [conn, conn_domains, conn_br]:
-            db.commit()
-            db.close()
+        conn.commit()
+        conn_domains.commit()
+        conn_br.commit()
+        conn.close()
+        conn_domains.close()
+        conn_br.close()
         
-        print(f"✅ STREAMING COMPLETO: {total_valid:,} linhas válidas processadas!")
+        print(f"✅ STREAMING COMPLETO: {total_valid:,} linhas válidas de {lines_processed:,} processadas!")
         return total_valid
         
     except Exception as e:
-        print(f"✗ Erro no streaming: {str(e)[:100]}")
+        print(f"✗ Erro no streaming: {str(e)}")
         return 0
 
 
@@ -1138,23 +1177,23 @@ def extrair_arquivo_comprimido(file):
         file.seek(0)  # Volta para o início
         file_size_mb = file_size / (1024 * 1024)
         
-        print(f"➤ Extraindo: {file.filename} ({file_size_mb:.1f}MB)")
+        print(f"➤ Extraindo arquivo: {file.filename} ({file_size_mb:.1f}MB)")
         
-        # Para arquivos gigantes (>500MB), usa processamento ultra-otimizado
-        if file_size_mb > 500:
-            print(f"🚀 ARQUIVO GIGANTE detectado! Processamento streaming...")
-            return processar_arquivo_gigante(file, file_size_mb)
+        # Para arquivos grandes (>100MB), força streaming para evitar RAM
+        if file_size_mb > 100:
+            print(f"🚀 ARQUIVO GRANDE ({file_size_mb:.1f}MB) -> STREAMING direto para SQLite!")
+            return "STREAMING_GIGANTE"
         
-        # Para arquivos grandes (>50MB), usa chunks otimizados
-        elif file_size_mb > 50:
-            print(f"📈 Arquivo grande detectado, processamento em chunks...")
+        # Para arquivos médios (>20MB), usa chunks otimizados
+        elif file_size_mb > 20:
+            print(f"📈 Arquivo médio detectado, processamento em chunks...")
             return extrair_arquivo_grande(file)
         
-        # Arquivos pequenos (<50MB) - processamento normal
+        # Arquivos pequenos (<20MB) - processamento normal
         return extrair_arquivo_normal(file)
         
     except Exception as e:
-        print(f"✗ Erro geral na extração: {str(e)[:50]}")
+        print(f"✗ Erro geral na extração: {str(e)[:100]}")
         return []
 
 def extrair_arquivo_normal(file):
@@ -1343,12 +1382,13 @@ def upload_file():
                     try:
                         content = extrair_arquivo_comprimido(file)
                         
-                        # Processamento especial para arquivos gigantes
+                        # Processamento especial para arquivos grandes via streaming
                         if content == "STREAMING_GIGANTE":
-                            print(f"🚀 PROCESSAMENTO DIRETO 1GB+: {file.filename}")
+                            print(f"🚀 PROCESSAMENTO STREAMING: {file.filename}")
+                            file.seek(0)  # Garante que está no início
                             total_valid = processar_streaming_direto(file, session, ip_hash)
                             total_filtradas += total_valid
-                            arquivos_processados.append(f"{file.filename} ({total_valid:,} válidas - STREAMING)")
+                            arquivos_processados.append(f"{file.filename} ({total_valid:,} válidas - STREAM)")
                             continue
                         
                         if not content:
@@ -1359,26 +1399,42 @@ def upload_file():
                         # Inicializa progresso
                         update_progress(ip_hash, 0, len(content), file.filename, "processing")
                         
-                        # Processamento ultra-otimizado para RAM limitada
-                        batch_size = 1000  # Chunks menores para 1GB
+                        # Detecta se arquivo é muito grande para RAM
+                        file_size_mb = len(str(content)) / (1024 * 1024)
+                        
+                        # Se for maior que 200MB, força streaming para economizar RAM
+                        if file_size_mb > 200:
+                            print(f"💾 ARQUIVO GRANDE ({file_size_mb:.1f}MB) -> Forçando STREAMING direto")
+                            del content  # Libera da RAM imediatamente
+                            total_valid = processar_streaming_direto(file, session, ip_hash)
+                            total_filtradas += total_valid
+                            arquivos_processados.append(f"{file.filename} ({total_valid:,} válidas - STREAM)")
+                            continue
+                        
+                        # Processamento normal para arquivos pequenos/médios
+                        batch_size = 500  # Batches menores para economizar RAM
                         total_valid = 0
                         
-                        # Conexões SQLite com configuração de alta performance
+                        # Conexões SQLite com configuração balanceada
                         conn = sqlite3.connect(session['databases']['main'])
                         conn_domains = sqlite3.connect(session['databases']['domains'])
                         conn_br = sqlite3.connect(session['databases']['brazilian'])
                         
-                        # Configurações SQLite para arquivos gigantes
+                        # Configurações SQLite balanceadas (não extremas)
                         for db_conn in [conn, conn_domains, conn_br]:
-                            db_conn.execute('PRAGMA journal_mode=OFF')  # Mais rápido para bulk
-                            db_conn.execute('PRAGMA synchronous=OFF')   # Máxima velocidade
-                            db_conn.execute('PRAGMA cache_size=50000')  # Cache grande
+                            db_conn.execute('PRAGMA journal_mode=WAL')     # Mais seguro que OFF
+                            db_conn.execute('PRAGMA synchronous=NORMAL')   # Compromisso velocidade/segurança
+                            db_conn.execute('PRAGMA cache_size=20000')     # Cache moderado 20MB
                             db_conn.execute('PRAGMA temp_store=MEMORY')
-                            db_conn.execute('PRAGMA mmap_size=268435456')  # 256MB mmap
                         
                         cursor = conn.cursor()
                         cursor_domains = conn_domains.cursor()
                         cursor_br = conn_br.cursor()
+                        
+                        # Begin transactions
+                        conn.execute('BEGIN TRANSACTION')
+                        conn_domains.execute('BEGIN TRANSACTION')
+                        conn_br.execute('BEGIN TRANSACTION')
                         
                         # Processa em micro-batches para não estourar RAM
                         for i in range(0, len(content), batch_size):
@@ -1420,7 +1476,7 @@ def upload_file():
                                 except:
                                     continue
                             
-                            # Inserts em lote ultra-rápidos
+                            # Inserts em lote
                             if batch_data:
                                 cursor.executemany('INSERT INTO credentials (url, username, password, linha_completa) VALUES (?, ?, ?, ?)', batch_data)
                             
@@ -1435,18 +1491,21 @@ def upload_file():
                             lines_processed = i + len(batch)
                             
                             # Atualiza progresso a cada 30k linhas
-                            if lines_processed % 30000 == 0 or (lines_processed - batch_size) // 30000 != lines_processed // 30000:
+                            if lines_processed % 30000 == 0:
+                                percentage = round((lines_processed / len(content) * 100), 1)
                                 update_progress(ip_hash, lines_processed, len(content), file.filename, "processing")
-                                print(f"   📊 PROGRESSO: {lines_processed:,}/{len(content):,} linhas ({total_valid:,} válidas)")
+                                print(f"   📊 PROGRESSO: {lines_processed:,}/{len(content):,} linhas ({total_valid:,} válidas) - {percentage}%")
                             
-                            # Commit mais frequente para arquivos grandes
-                            if i % (batch_size * 5) == 0:  # A cada 5k linhas
+                            # Commit a cada 2500 linhas para liberar memória
+                            if i % (batch_size * 5) == 0:  # A cada 2.5k linhas
                                 conn.commit()
                                 conn_domains.commit()
                                 conn_br.commit()
-                                print(f"   💾 Salvo: {lines_processed:,}/{len(content):,} ({total_valid:,} válidas)")
+                                conn.execute('BEGIN TRANSACTION')
+                                conn_domains.execute('BEGIN TRANSACTION')
+                                conn_br.execute('BEGIN TRANSACTION')
                             
-                            # Limpa memória imediatamente
+                            # Limpa batches da memória imediatamente
                             del batch_data, domains_set, br_data, batch
                         
                         # Commit final
@@ -1457,11 +1516,11 @@ def upload_file():
                         conn_domains.close()
                         conn_br.close()
                         
-                        # Libera content da memória
-                        del content
-                        
                         # Marca como concluído
                         update_progress(ip_hash, len(content), len(content), file.filename, "completed")
+                        
+                        # Libera content da memória
+                        del content
                         
                         print(f"   ✅ Total processado: {total_valid:,} válidas")
                         total_filtradas += total_valid
