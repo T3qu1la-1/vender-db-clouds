@@ -247,13 +247,34 @@ def processar_streaming_direto(file, session, ip_hash):
             shard_connections[shard_num] = conn
             print(f"   📦 Shard {shard_num} preparado para streaming")
         
-        # Streaming com distribuição nos shards
+        # Streaming com distribuição nos shards + detecção BR
         total_valid = 0
+        total_br_urls = 0
         linha_buffer = ""
         chunk_size = 65536  # 64KB chunks para arquivos gigantes
         bytes_processed = 0
         shard_batches = {0: [], 1: [], 2: [], 3: []}
+        br_batch = []
         batch_size = 1000
+        
+        # Conexão para URLs brasileiras
+        conn_br = sqlite3.connect(os.path.join(os.path.dirname(session['databases']['main']), 'brazilian.db'))
+        conn_br.execute('PRAGMA journal_mode=OFF')
+        conn_br.execute('PRAGMA synchronous=OFF')
+        conn_br.execute('PRAGMA cache_size=50000')
+        conn_br.execute('BEGIN TRANSACTION')
+        
+        cursor_br = conn_br.cursor()
+        cursor_br.execute('''
+        CREATE TABLE IF NOT EXISTS brazilian_urls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            url TEXT NOT NULL,
+            linha_completa TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        ''')
+        conn_br.commit()
+        conn_br.execute('BEGIN TRANSACTION')
         
         import hashlib
         
@@ -294,6 +315,11 @@ def processar_streaming_direto(file, session, ip_hash):
                     
                     shard_batches[shard_num].append((url, username, password, linha_limpa, file.filename, shard_num))
                     
+                    # 🇧🇷 ESCANEAMENTO BR: Detecta URLs brasileiras automaticamente
+                    if detectar_url_brasileira(url):
+                        br_batch.append((url, linha_limpa))
+                        total_br_urls += 1
+                    
                 except:
                     continue
             
@@ -312,9 +338,19 @@ def processar_streaming_direto(file, session, ip_hash):
                         shard_connections[shard_num].execute('BEGIN TRANSACTION')
                         total_valid += len(batch_data)
                 
-                # Mostra progresso detalhado
+                # 🇧🇷 Processa lote de URLs brasileiras
+                if br_batch:
+                    cursor_br.executemany('''
+                    INSERT INTO brazilian_urls (url, linha_completa)
+                    VALUES (?, ?)
+                    ''', br_batch)
+                    conn_br.commit()
+                    conn_br.execute('BEGIN TRANSACTION')
+                    br_batch = []
+                
+                # Mostra progresso detalhado incluindo URLs BR
                 if total_valid % 50000 == 0:
-                    print(f"   🚀 STREAM {progress:.1f}%: {total_valid:,} válidas, {bytes_processed/(1024*1024):.1f}MB processados")
+                    print(f"   🚀 STREAM {progress:.1f}%: {total_valid:,} válidas, {total_br_urls:,} BRs, {bytes_processed/(1024*1024):.1f}MB")
                 
                 # Limpa batches
                 shard_batches = {0: [], 1: [], 2: [], 3: []}
@@ -333,11 +369,21 @@ def processar_streaming_direto(file, session, ip_hash):
                 shard_connections[shard_num].commit()
                 total_valid += len(batch_data)
         
+        # 🇧🇷 Processa lote final de URLs brasileiras
+        if br_batch:
+            cursor_br.executemany('''
+            INSERT INTO brazilian_urls (url, linha_completa)
+            VALUES (?, ?)
+            ''', br_batch)
+            conn_br.commit()
+        
         # Fecha conexões
         for conn in shard_connections.values():
             conn.close()
+        conn_br.close()
         
         print(f"✅ STREAMING 500MB+ COMPLETO: {total_valid:,} linhas nos 4 shards!")
+        print(f"🇧🇷 URLs BRASILEIRAS DETECTADAS: {total_br_urls:,} salvas em brazilian.db")
         
         # Exibe distribuição final
         for shard_num in range(4):
@@ -1316,18 +1362,61 @@ def linha_valida(linha):
     
     return False
 
+def detectar_url_brasileira(url):
+    """Detecta se uma URL é brasileira com padrões expandidos"""
+    url_lower = url.lower()
+    
+    # Padrões brasileiros expandidos
+    br_patterns = [
+        # Domínios .br
+        '.br', '.com.br', '.org.br', '.gov.br', '.edu.br', '.net.br', '.mil.br',
+        '.art.br', '.blog.br', '.eco.br', '.emp.br', '.eti.br', '.far.br',
+        '.flog.br', '.fnd.br', '.fot.br', '.fst.br', '.g12.br', '.geo.br',
+        '.mus.br', '.not.br', '.ntr.br', '.odo.br', '.ppg.br', '.pro.br',
+        '.psc.br', '.psi.br', '.qsl.br', '.radio.br', '.rec.br', '.slg.br',
+        '.srv.br', '.tmp.br', '.trd.br', '.tur.br', '.tv.br', '.vet.br',
+        '.vlog.br', '.wiki.br', '.zlg.br',
+        
+        # Sites brasileiros conhecidos
+        'uol.com', 'globo.com', 'terra.com.br', 'ig.com.br', 'folha.uol.com.br',
+        'estadao.com.br', 'veja.abril.com.br', 'band.uol.com.br', 'r7.com',
+        'g1.globo.com', 'mercadolivre.com.br', 'americanas.com.br', 'submarino.com.br',
+        'magazine.luiza', 'casasbahia.com.br', 'pontofrio.com.br',
+        
+        # Bancos brasileiros
+        'itau.com.br', 'bradesco.com.br', 'bancodobrasil.com.br', 'caixa.gov.br',
+        'santander.com.br', 'nubank.com.br', 'inter.co', 'original.com.br',
+        'safra.com.br', 'btgpactual.com', 'sicoob.com.br', 'sicredi.com.br',
+        
+        # Órgãos governamentais
+        'gov.br', 'receita.fazenda.gov.br', 'detran', 'tse.jus.br', 'trf',
+        'tjsp.jus.br', 'tjrj.jus.br', 'tjmg.jus.br', 'tjrs.jus.br',
+        'correios.com.br', 'cep.correios.com.br',
+        
+        # Telecomunicações
+        'vivo.com.br', 'tim.com.br', 'claro.com.br', 'oi.com.br',
+        'net.com.br', 'sky.com.br', 'nextel.com.br',
+        
+        # Educação
+        'usp.br', 'unicamp.br', 'ufrj.br', 'ufmg.br', 'ufrs.br', 'unb.br',
+        'puc-rio.br', 'mackenzie.br', 'fgv.br', 'capes.gov.br', 'cnpq.br',
+        
+        # Palavras relacionadas ao Brasil
+        'brasil', 'brazil', 'brasileiro', 'brasilia', 'saopaulo', 'riodejaneiro',
+        'minasgerais', 'bahia', 'parana', 'goias', 'ceara', 'pernambuco'
+    ]
+    
+    return any(pattern in url_lower for pattern in br_patterns)
+
 def filtrar_urls_brasileiras(linhas):
     print("➤ Filtrando URLs brasileiras...")
     urls_brasileiras = []
-    
-    br_patterns = ['.br', '.com.br', '.org.br', '.gov.br', '.edu.br', 'uol.com', 'globo.com', 
-                  'brasil', 'brazil', 'itau', 'bradesco', 'nubank', 'correios', 'detran']
     
     for linha in linhas:
         linha_limpa = linha.strip()
         url_parte = linha_limpa.split(':')[0] if ':' in linha_limpa else linha_limpa
         
-        if any(pattern in url_parte.lower() for pattern in br_patterns):
+        if detectar_url_brasileira(url_parte):
             urls_brasileiras.append(linha_limpa)
     
     print(f"✓ Filtrado: {len(urls_brasileiras)} URLs brasileiras")
@@ -1430,8 +1519,8 @@ def upload_file():
                                 
                                 shard_batches[shard_num].append((url, username, password, linha_limpa, file.filename, shard_num))
                                 
-                                # Dados auxiliares
-                                if any(br in url.lower() for br in ['.br', '.com.br', 'uol.com', 'globo.com', 'brasil']):
+                                # 🇧🇷 ESCANEAMENTO BR: Detecta URLs brasileiras automaticamente
+                                if detectar_url_brasileira(url):
                                     br_data.append((url, linha_limpa))
                                 
                                 try:
