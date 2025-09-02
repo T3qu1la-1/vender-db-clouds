@@ -21,7 +21,7 @@ def cleanup_old_temp_files():
     import glob
     temp_dir = tempfile.gettempdir()
     current_time = time.time()
-    
+
     try:
         # Usa glob para buscar apenas arquivos específicos (mais rápido que listar tudo)
         patterns = [
@@ -29,7 +29,7 @@ def cleanup_old_temp_files():
             os.path.join(temp_dir, "*database*.db"),
             os.path.join(temp_dir, "*_otimizado.txt")
         ]
-        
+
         files_removed = 0
         for pattern in patterns:
             for filepath in glob.glob(pattern):
@@ -45,10 +45,10 @@ def cleanup_old_temp_files():
                                 return
                 except Exception as e:
                     app.logger.error(f"Erro ao remover arquivo {filepath}: {e}")
-        
+
         if files_removed > 0:
             app.logger.info(f"Limpeza concluída: {files_removed} arquivos temporários removidos")
-            
+
     except Exception as e:
         app.logger.error(f"Erro na limpeza de arquivos temporários: {e}")
 
@@ -58,7 +58,7 @@ def init_cleanup():
     cleanup_thread = threading.Thread(target=cleanup_old_temp_files, daemon=True)
     cleanup_thread.start()
 
-init_cleanup()
+# init_cleanup() # Comentado para remover limpeza automática
 
 # Pasta de uploads não é mais criada - tudo é processado em memória
 # UPLOAD_FOLDER removido - arquivos são temporários
@@ -315,7 +315,7 @@ html_form = """
             <div class="progress-detail">Compilando todas as linhas processadas</div>
         </div>
     </div>
-    
+
     <div class="container py-5">
         <div class="row justify-content-center">
             <div class="col-lg-8">
@@ -339,7 +339,7 @@ html_form = """
                                 </div>
                             </div>
                         </div>
-                        
+
                         <form method="post" enctype="multipart/form-data" class="mb-4" onsubmit="showLoading()">
                             <div class="mb-4">
                                 <label class="form-label fw-bold">
@@ -385,7 +385,7 @@ html_form = """
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <div class="mb-4">
                                 <label for="filename" class="form-label fw-bold">
                                     <i class="fas fa-tag me-2" style="color: #667eea;"></i>
@@ -408,7 +408,7 @@ html_form = """
                                 </div>
                                 <small class="text-muted">💡 Arquivo manterá TODAS as linhas válidas processadas</small>
                             </div>
-                            
+
                             <div class="d-grid">
                                 <button type="submit" class="btn btn-gradient btn-lg py-3">
                                     <i class="fas fa-rocket me-3"></i>
@@ -416,7 +416,7 @@ html_form = """
                                 </button>
                             </div>
                         </form>
-                        
+
                         <div class="text-center mt-4">
                             <div class="mb-4">
                                 <div class="stats-badge d-inline-block">
@@ -453,15 +453,15 @@ html_form = """
             </div>
         </div>
     </div>
-    
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         function showLoading() {
             document.getElementById('loadingOverlay').style.display = 'flex';
         }
-        
-        
-        
+
+
+
         // Atualiza labels dos arquivos quando selecionados
         document.querySelectorAll('input[type="file"]').forEach(input => {
             input.addEventListener('change', function() {
@@ -507,51 +507,51 @@ def extrair_arquivo_comprimido(file):
     except Exception as e:
         app.logger.error(f"Erro ao extrair arquivo {file.filename}: {e}")
         return []
-    
+
     return linhas
 
 def filtrar_urls_brasileiras(linhas):
     """Filtra apenas URLs que contêm domínios brasileiros (.br)"""
     urls_brasileiras = []
     dominios_br = ['.br', '.com.br', '.org.br', '.net.br', '.gov.br', '.edu.br']
-    
+
     for linha in linhas:
         linha_limpa = linha.strip()
         if any(dominio in linha_limpa.lower() for dominio in dominios_br):
             urls_brasileiras.append(linha_limpa)
-    
+
     return urls_brasileiras
 
 def linha_valida(linha: str) -> bool:
     """Verifica se a linha segue o padrão url:user:pass - versão melhorada"""
     if not linha or not linha.strip():
         return False
-    
+
     linha = linha.strip()
-    
+
     # Remove aspas duplas no início e fim se existirem
     if linha.startswith('"') and linha.endswith('"'):
         linha = linha[1:-1]
-    
+
     # Lida com formato "URL":"user":"pass" - substitui aspas entre os campos
     if linha.count('":"') >= 2:
         # Remove todas as aspas e substitui por separadores simples
         linha = linha.replace('":"', ':').strip('"')
-    
+
     # Lida com formato "URL:user:pass" (aspas só no início/fim)
     if linha.startswith('"') and linha.endswith('"'):
         linha = linha[1:-1]
-    
+
     # Remove espaços extras e caracteres de controle
     linha = ' '.join(linha.split())
-    
+
     # Tenta diferentes separadores comuns
     separadores = [':', '|', ';', '\t', ' ']
-    
+
     for sep in separadores:
         if sep in linha:
             partes = [p.strip() for p in linha.split(sep) if p.strip()]
-            
+
             # Verifica se tem pelo menos 3 partes não vazias
             if len(partes) >= 3:
                 # Para URLs que começam com http:// ou https://
@@ -567,22 +567,22 @@ def linha_valida(linha: str) -> bool:
                         user = partes[-2].strip()
                         password = partes[-1].strip()
                         return bool(url and user and password and len(user) > 0 and len(password) > 0)
-                
+
                 # Para URLs sem protocolo ou outros formatos
                 url, user, password = partes[0], partes[1], partes[2]
-                
+
                 # Valida se todas as partes têm conteúdo válido
                 if (url and user and password and 
                     len(url.strip()) > 0 and 
                     len(user.strip()) > 0 and 
                     len(password.strip()) > 0):
-                    
+
                     # Verifica se não são apenas caracteres especiais
                     if (not all(c in '.:/-_' for c in url.strip()) and
                         not all(c in '.:/-_' for c in user.strip()) and  
                         not all(c in '.:/-_' for c in password.strip())):
                         return True
-    
+
     # Fallback original para formato padrão url:user:pass
     if ':' in linha:
         partes = linha.split(":")
@@ -603,7 +603,7 @@ def linha_valida(linha: str) -> bool:
             elif len(partes) == 3:
                 url, user, password = partes[0].strip(), partes[1].strip(), partes[2].strip()
                 return bool(url and user and password and len(url) > 0 and len(user) > 0 and len(password) > 0)
-    
+
     return False
 
 @app.route("/", methods=["GET", "POST"])
@@ -616,11 +616,11 @@ def upload_file():
             if not filename:
                 filename = "resultado_final"
             session_data['nome_arquivo_final'] = filename
-            
+
             # Processa múltiplos arquivos
             arquivos_processados = []
             total_filtradas = 0
-            
+
             for i in range(1, 5):  # file1, file2, file3, file4
                 file = request.files.get(f"file{i}")
                 if file and file.filename and (file.filename.lower().endswith((".txt", ".rar", ".zip"))):
@@ -628,20 +628,20 @@ def upload_file():
                         # Extrai conteúdo do arquivo (txt, zip ou rar)
                         content = extrair_arquivo_comprimido(file)
                         app.logger.info(f"Arquivo {file.filename} processado com {len(content)} linhas")
-                        
+
                         # filtra linhas válidas
                         filtradas = []
                         linhas_processadas = 0
                         linhas_rejeitadas = 0
                         amostras_rejeitadas = []
-                        
+
                         for linha in content:
                             linha_limpa = linha.strip()
                             if linha_limpa:  # ignora linhas vazias
                                 linhas_processadas += 1
                                 if linha_valida(linha_limpa):
                                     filtradas.append(linha_limpa)
-                                    
+
                                     # Força garbage collection a cada 50k linhas para economizar memória
                                     if len(filtradas) % 50000 == 0:
                                         import gc
@@ -654,37 +654,37 @@ def upload_file():
                                     # Coleta amostras de linhas rejeitadas para debug
                                     if len(amostras_rejeitadas) < 10:
                                         amostras_rejeitadas.append(linha_limpa[:100])  # Primeiros 100 chars
-                        
+
                         # Log detalhado com estatísticas
                         taxa_validacao = (len(filtradas) / linhas_processadas * 100) if linhas_processadas > 0 else 0
                         app.logger.info(f"📁 {file.filename}:")
                         app.logger.info(f"   📊 Total lidas: {len(content):,}")
                         app.logger.info(f"   ✅ Válidas: {len(filtradas):,} ({taxa_validacao:.1f}%)")
                         app.logger.info(f"   ❌ Rejeitadas: {linhas_rejeitadas:,}")
-                        
+
                         # Log amostras de linhas rejeitadas para debug
                         if amostras_rejeitadas:
                             app.logger.info(f"   🔍 Amostras rejeitadas:")
                             for i, amostra in enumerate(amostras_rejeitadas[:5], 1):
                                 app.logger.info(f"      {i}. {amostra}")
-                        
+
                         # Se a taxa de validação estiver muito baixa, alerta
                         if taxa_validacao < 5 and len(content) > 10000:
                             app.logger.warning(f"⚠️ Taxa de validação baixa ({taxa_validacao:.1f}%) para {file.filename}")
                             app.logger.warning(f"   Possível formato não suportado ou dados corrompidos")
-                        
+
                         # adiciona ao acumulador
                         linhas_antes = len(session_data['all_lines'])
                         session_data['all_lines'].extend(filtradas)
                         total_filtradas += len(filtradas)
                         arquivos_processados.append(f"{file.filename} ({len(filtradas)} válidas)")
-                        
+
                     except Exception as e:
                         app.logger.error(f"Erro ao processar arquivo {file.filename}: {e}")
                         arquivos_processados.append(f"{file.filename} (erro)")
-            
+
             app.logger.info(f"Total acumulado: {len(session_data['all_lines'])}")
-            
+
             if not arquivos_processados:
                 # Nenhum arquivo foi enviado
                 error_html = """
@@ -708,7 +708,7 @@ def upload_file():
                                             <h4 class="alert-heading">Nenhum Arquivo</h4>
                                             <p class="mb-0">Selecione pelo menos um arquivo .txt para processar</p>
                                         </div>
-                                        
+
                                         <a href="/" class="btn btn-secondary">
                                             <i class="fas fa-arrow-left me-2"></i>
                                             Tentar Novamente
@@ -722,11 +722,11 @@ def upload_file():
                 </html>
                 """
                 return error_html
-            
+
             # Armazena o nome do arquivo escolhido para usar no download
             global nome_arquivo_final
             nome_arquivo_final = filename
-            
+
             # Mensagem de sucesso
             lista_arquivos = "<br>".join([f"✅ {arq}" for arq in arquivos_processados])
             success_html = f"""
@@ -783,7 +783,7 @@ def upload_file():
                     </div>
                 </div>
                 <style>@keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}</style>
-                
+
                 <div class="container py-5">
                     <div class="row justify-content-center">
                         <div class="col-lg-8">
@@ -793,14 +793,14 @@ def upload_file():
                                         <i class="fas fa-rocket fs-1" style="color: #38ef7d;"></i>
                                     </div>
                                     <h2 class="text-white mb-4">🎉 Processamento Concluído!</h2>
-                                    
+
                                     <div class="alert alert-success border-0" style="background: rgba(56, 239, 125, 0.2); border-radius: 15px;">
                                         <h5 class="text-white">📁 Arquivos Processados:</h5>
                                         <div class="mt-3 text-start">
                                             {lista_arquivos}
                                         </div>
                                     </div>
-                                    
+
                                     <div class="row g-3 my-4">
                                         <div class="col-md-6">
                                             <div class="p-3 rounded-3" style="background: rgba(56, 239, 125, 0.2);">
@@ -817,7 +817,7 @@ def upload_file():
                                             </div>
                                         </div>
                                     </div>
-                                    
+
                                     <div class="d-grid gap-3 d-md-flex justify-content-md-center">
                                         <a href="/" class="btn btn-light btn-lg">
                                             <i class="fas fa-upload me-2"></i>
@@ -828,7 +828,7 @@ def upload_file():
                                             💾 Download Completo
                                         </a>
                                     </div>
-                                    
+
                                     <div class="mt-4">
                                         <small class="text-white-50">
                                             💡 O arquivo conterá TODAS as linhas válidas processadas
@@ -839,13 +839,13 @@ def upload_file():
                         </div>
                     </div>
                 </div>
-                
-                
+
+
             </body>
             </html>
             """
             return success_html
-            
+
         except Exception as e:
             app.logger.error(f"Erro geral no processamento: {e}")
             error_html = """
@@ -869,7 +869,7 @@ def upload_file():
                                         <h4 class="alert-heading">Erro no Processamento</h4>
                                         <p class="mb-0">Erro interno. Tente novamente.</p>
                                     </div>
-                                    
+
                                     <a href="/" class="btn btn-secondary">
                                         <i class="fas fa-arrow-left me-2"></i>
                                         Tentar Novamente
@@ -883,7 +883,7 @@ def upload_file():
             </html>
             """
             return error_html
-    
+
     return render_template_string(html_form)
 
 @app.route("/download")
@@ -912,7 +912,7 @@ def download():
                                         <h4 class="alert-heading">Nenhum Arquivo Disponível</h4>
                                         <p class="mb-0">Não há linhas válidas para download. Faça upload de arquivos primeiro.</p>
                                     </div>
-                                    
+
                                     <a href="/" class="btn btn-primary">
                                         <i class="fas fa-upload me-2"></i>
                                         Fazer Upload
@@ -926,21 +926,19 @@ def download():
             </html>
             """
             return error_html
-        
+
         # Download direto da memória - sem arquivos temporários
         linhas_finais = session_data['all_lines']
         linhas_finais_count = len(linhas_finais)
-        
+
         app.logger.info(f"Download direto: {linhas_finais_count:,} linhas")
-        
+
         # Nome do arquivo
         filename = f"{session_data.get('nome_arquivo_final', 'resultado_final')}.txt"
-        
+
         # Cria conteúdo final na memória
         conteudo_final = '\n'.join(linhas_finais)
-        
-        # Resposta HTTP direta
-        from flask import Response
+
         return Response(
             conteudo_final,
             mimetype='text/plain',
@@ -949,86 +947,37 @@ def download():
                 'Content-Type': 'text/plain; charset=utf-8'
             }
         )
-        
+
     except MemoryError:
-            app.logger.error("Erro de memória ao salvar arquivo")
-            return "Arquivo muito grande para processar. Tente dividir em arquivos menores.", 413
-        except Exception as write_error:
-            app.logger.error(f"Erro ao escrever arquivo: {write_error}")
-            return "Erro ao criar arquivo para download", 500
-        
-        # Verifica se o arquivo foi criado corretamente
-        if not os.path.exists(caminho_saida):
-            app.logger.error("Arquivo não foi criado")
-            return "Erro: arquivo não foi criado", 500
-            
-        file_size = os.path.getsize(caminho_saida)
-        app.logger.info(f"Iniciando download: {filename} ({file_size / (1024*1024):.1f} MB)")
-        
-        # Para arquivos muito grandes, adiciona parâmetros específicos
-        try:
-            if file_size > 50 * 1024 * 1024:  # Arquivos maiores que 50MB
-                app.logger.info("Arquivo grande detectado, usando streaming response")
-                return send_file(
-                    caminho_saida, 
-                    as_attachment=True, 
-                    download_name=filename,
-                    conditional=True,  # Permite download parcial
-                    max_age=0  # Não cachear
-                )
-            else:
-                # Programa limpeza do arquivo após download
-                def cleanup_file():
-                    try:
-                        if os.path.exists(caminho_saida):
-                            os.remove(caminho_saida)
-                            app.logger.info(f"Arquivo temporário removido: {filename}")
-                    except Exception as cleanup_error:
-                        app.logger.error(f"Erro ao limpar arquivo: {cleanup_error}")
-                        
-                # Agenda limpeza para após o download (usando thread)
-                import threading
-                timer = threading.Timer(30.0, cleanup_file)  # Remove após 30 segundos
-                timer.start()
-                
-                return send_file(caminho_saida, as_attachment=True, download_name=filename)
-                
-        except Exception as send_error:
-            app.logger.error(f"Erro ao enviar arquivo: {send_error}")
-            # Limpa arquivo em caso de erro
-            try:
-                if os.path.exists(caminho_saida):
-                    os.remove(caminho_saida)
-            except:
-                pass
-            return "Erro ao enviar arquivo para download", 500
-        
-    except Exception as e:
-        app.logger.error(f"Erro ao gerar download: {e}")
-        return "Erro ao gerar arquivo para download", 500
+        app.logger.error("Erro de memória ao salvar arquivo")
+        return "Arquivo muito grande para processar. Tente dividir em arquivos menores.", 413
+    except Exception as write_error:
+        app.logger.error(f"Erro ao escrever arquivo: {write_error}")
+        return "Erro ao criar arquivo para download", 500
+
 
 @app.route("/txt-to-db", methods=["GET", "POST"])
 def txt_to_db():
     """Página para converter arquivos TXT em banco de dados SQLite"""
-    
+
     if request.method == "POST":
         try:
             # Pega o nome do arquivo DB
             db_filename = request.form.get("db_filename", "database").strip()
             if not db_filename:
                 db_filename = "database"
-            
+
             # Processa múltiplos arquivos
             arquivos_processados = []
             total_linhas = 0
-            
+
             # Cria arquivo temporário para o banco SQLite (será removido após download)
             db_path = os.path.join(tempfile.gettempdir(), f"{db_filename}.db")
-            
+
             # Conecta ao banco SQLite
             conn = sqlite3.connect(db_path)
             cursor = conn.cursor()
-            
+
             # Cria a tabela para armazenar os dados
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS credentials (
@@ -1040,7 +989,7 @@ def txt_to_db():
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
-            
+
             for i in range(1, 5):  # file1, file2, file3, file4
                 file = request.files.get(f"file{i}")
                 if file and file.filename and file.filename.endswith(".txt"):
@@ -1048,7 +997,7 @@ def txt_to_db():
                         # lê o conteúdo do arquivo
                         content = file.read().decode("utf-8", errors="ignore").splitlines()
                         linhas_inseridas = 0
-                        
+
                         for linha in content:
                             linha_limpa = linha.strip()
                             if linha_limpa and linha_valida(linha_limpa):
@@ -1066,32 +1015,31 @@ def txt_to_db():
                                     url, user, password = partes
                                 else:
                                     continue
-                                
+
                                 # Insere no banco
                                 cursor.execute('''
                                     INSERT INTO credentials (url, username, password, source_file)
                                     VALUES (?, ?, ?, ?)
                                 ''', (url.strip(), user.strip(), password.strip(), file.filename))
                                 linhas_inseridas += 1
-                        
+
                         total_linhas += linhas_inseridas
                         arquivos_processados.append(f"{file.filename} ({linhas_inseridas} registros)")
-                        
+
                     except Exception as e:
                         app.logger.error(f"Erro ao processar arquivo {file.filename}: {e}")
                         arquivos_processados.append(f"{file.filename} (erro)")
-            
+
             # Salva e fecha conexão
             conn.commit()
             conn.close()
-            
+
             if not arquivos_processados:
                 return render_template_string("""
                 <!doctype html>
                 <html lang="pt-BR" data-bs-theme="dark">
                 <head>
                     <meta charset="utf-8">
-                    <meta name="viewport" content="width=device-width, initial-scale=1">
                     <title>Erro</title>
                     <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
                 </head>
@@ -1106,7 +1054,7 @@ def txt_to_db():
                 </body>
                 </html>
                 """)
-            
+
             # Mensagem de sucesso
             lista_arquivos = "<br>".join([f"• {arq}" for arq in arquivos_processados])
             return render_template_string(f"""
@@ -1133,7 +1081,7 @@ def txt_to_db():
                                         <hr>
                                         <small>Arquivo: <strong>{db_filename}.db</strong></small>
                                     </div>
-                                    
+
                                     <div class="d-grid gap-2">
                                         <a href="/txt-to-db" class="btn btn-primary">
                                             <i class="fas fa-arrow-left me-2"></i>
@@ -1156,7 +1104,7 @@ def txt_to_db():
             </body>
             </html>
             """)
-            
+
         except Exception as e:
             app.logger.error(f"Erro na conversão: {e}")
             return render_template_string("""
@@ -1178,7 +1126,7 @@ def txt_to_db():
             </body>
             </html>
             """)
-    
+
     # GET request - mostra o formulário
     return render_template_string("""
     <!doctype html>
@@ -1207,7 +1155,7 @@ def txt_to_db():
                                 <strong>Converta arquivos TXT em banco SQLite (.db)</strong><br>
                                 <small>Os dados serão organizados em tabela com colunas: URL, Usuário, Senha</small>
                             </div>
-                            
+
                             <form method="post" enctype="multipart/form-data" class="mb-4">
                                 <div class="mb-3">
                                     <label class="form-label">
@@ -1219,7 +1167,7 @@ def txt_to_db():
                                     <input type="file" class="form-control mb-2" name="file3" accept=".txt">
                                     <input type="file" class="form-control mb-2" name="file4" accept=".txt">
                                 </div>
-                                
+
                                 <div class="mb-3">
                                     <label for="db_filename" class="form-label">
                                         <i class="fas fa-database me-2"></i>
@@ -1233,7 +1181,7 @@ def txt_to_db():
                                            value="database">
                                     <small class="text-muted">O banco será salvo como [nome].db</small>
                                 </div>
-                                
+
                                 <div class="d-grid">
                                     <button type="submit" class="btn btn-primary">
                                         <i class="fas fa-cogs me-2"></i>
@@ -1241,7 +1189,7 @@ def txt_to_db():
                                     </button>
                                 </div>
                             </form>
-                            
+
                             <div class="text-center">
                                 <a href="/" class="btn btn-secondary">
                                     <i class="fas fa-arrow-left me-2"></i>
@@ -1272,12 +1220,12 @@ def download_db(filename):
                         app.logger.info(f"Arquivo DB temporário removido: {filename}.db")
                 except Exception as cleanup_error:
                     app.logger.error(f"Erro ao limpar DB: {cleanup_error}")
-            
+
             # Agenda limpeza para após o download
             import threading
             timer = threading.Timer(60.0, cleanup_db)  # Remove após 60 segundos para DBs
             timer.start()
-            
+
             return send_file(db_path, as_attachment=True, download_name=f"{filename}.db")
         else:
             return "Arquivo não encontrado", 404
@@ -1289,7 +1237,7 @@ def download_db(filename):
 def filter_br():
     """Rota para filtrar apenas URLs brasileiras"""
     global session_data
-    
+
     if not session_data['all_lines']:
         return render_template_string("""
         <!doctype html>
@@ -1312,19 +1260,19 @@ def filter_br():
         </body>
         </html>
         """)
-    
+
     # Filtra URLs brasileiras
     urls_br = filtrar_urls_brasileiras(session_data['all_lines'])
-    
+
     # Cria arquivo temporário com URLs brasileiras
     nome_arquivo = f"urls_brasileiras_{len(urls_br)}"
     arquivo_temp = os.path.join(tempfile.gettempdir(), f"{nome_arquivo}.txt")
-    
+
     try:
         with open(arquivo_temp, 'w', encoding='utf-8') as f:
             for url in urls_br:
                 f.write(f"{url}\\n")
-        
+
         return render_template_string(f"""
         <!doctype html>
         <html lang="pt-BR" data-bs-theme="dark">
@@ -1363,7 +1311,7 @@ def filter_br():
                                     <i class="fas fa-check-circle me-2 fs-4"></i>
                                     <strong>{len(urls_br):,}</strong> URLs brasileiras encontradas de <strong>{len(session_data['all_lines']):,}</strong> total
                                 </div>
-                                
+
                                 <div class="d-grid gap-2 d-md-flex justify-content-md-center mt-4">
                                     <a href="/download-filtered/{nome_arquivo}" class="btn btn-success btn-lg">
                                         <i class="fas fa-download me-2"></i>
@@ -1382,7 +1330,7 @@ def filter_br():
         </body>
         </html>
         """)
-        
+
     except Exception as e:
         app.logger.error(f"Erro ao criar arquivo de URLs brasileiras: {e}")
         return "Erro ao processar filtro", 500
@@ -1426,19 +1374,19 @@ def db_preview():
                 </body>
                 </html>
                 """)
-            
+
             # Salva arquivo temporariamente
             temp_db_path = os.path.join(tempfile.gettempdir(), f"preview_{db_file.filename}")
             db_file.save(temp_db_path)
-            
+
             # Conecta ao banco e obtém informações
             conn = sqlite3.connect(temp_db_path)
             cursor = conn.cursor()
-            
+
             # Lista tabelas
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
             tabelas = cursor.fetchall()
-            
+
             preview_html = f"""
             <!doctype html>
             <html lang="pt-BR" data-bs-theme="dark">
@@ -1478,18 +1426,18 @@ def db_preview():
                                 <strong>Tabelas encontradas:</strong> {len(tabelas)}
                             </div>
             """
-            
+
             # Para cada tabela, mostra uma prévia
             for tabela in tabelas:
                 nome_tabela = tabela[0]
                 cursor.execute(f"SELECT * FROM {nome_tabela} LIMIT 10")
                 dados = cursor.fetchall()
-                
+
                 # Obtém nomes das colunas
                 cursor.execute(f"PRAGMA table_info({nome_tabela})")
                 colunas_info = cursor.fetchall()
                 colunas = [col[1] for col in colunas_info]
-                
+
                 preview_html += f"""
                 <div class="mb-4">
                     <h4><i class="fas fa-table me-2"></i>Tabela: {nome_tabela}</h4>
@@ -1499,17 +1447,17 @@ def db_preview():
                             <thead class="table-dark">
                                 <tr>
                 """
-                
+
                 # Cabeçalhos
                 for coluna in colunas:
                     preview_html += f"<th>{coluna}</th>"
-                
+
                 preview_html += """
                                 </tr>
                             </thead>
                             <tbody>
                 """
-                
+
                 # Dados
                 for linha in dados:
                     preview_html += "<tr>"
@@ -1518,14 +1466,14 @@ def db_preview():
                         valor_str = str(valor)[:50] + "..." if len(str(valor)) > 50 else str(valor)
                         preview_html += f"<td>{valor_str}</td>"
                     preview_html += "</tr>"
-                
+
                 preview_html += """
                             </tbody>
                         </table>
                     </div>
                 </div>
                 """
-            
+
             preview_html += """
                             <div class="text-center">
                                 <a href="/db-preview" class="btn btn-primary me-2">
@@ -1543,17 +1491,17 @@ def db_preview():
             </body>
             </html>
             """
-            
+
             conn.close()
-            
+
             # Remove arquivo temporário
             try:
                 os.remove(temp_db_path)
             except:
                 pass
-            
+
             return preview_html
-            
+
         except Exception as e:
             app.logger.error(f"Erro ao visualizar DB: {e}")
             return render_template_string("""
@@ -1575,7 +1523,7 @@ def db_preview():
             </body>
             </html>
             """)
-    
+
     # GET request - mostra formulário de upload
     return render_template_string("""
     <!doctype html>
@@ -1636,7 +1584,7 @@ def db_preview():
                                     </small>
                                 </div>
                             </div>
-                            
+
                             <form method="post" enctype="multipart/form-data">
                                 <div class="file-upload-area mb-4" onclick="document.getElementById('db_file').click()">
                                     <i class="fas fa-cloud-upload-alt fs-1 text-primary mb-3"></i>
@@ -1645,7 +1593,7 @@ def db_preview():
                                     <input type="file" id="db_file" name="db_file" accept=".db" style="display: none;" onchange="updateFileName(this)">
                                     <div id="fileName" class="mt-2"></div>
                                 </div>
-                                
+
                                 <div class="d-grid">
                                     <button type="submit" class="btn btn-primary btn-lg">
                                         <i class="fas fa-eye me-2"></i>
@@ -1653,7 +1601,7 @@ def db_preview():
                                     </button>
                                 </div>
                             </form>
-                            
+
                             <div class="text-center mt-4">
                                 <a href="/" class="btn btn-secondary btn-lg">
                                     <i class="fas fa-arrow-left me-2"></i>
@@ -1665,7 +1613,7 @@ def db_preview():
                 </div>
             </div>
         </div>
-        
+
         <script>
             function updateFileName(input) {
                 const fileName = document.getElementById('fileName');
