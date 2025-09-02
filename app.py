@@ -197,6 +197,124 @@ def get_user_session(ip):
             print(f"⚠️ Erro ao carregar stats: {e}")
             pass
     
+
+def processar_streaming_direto(file, session, ip_hash):
+    """Processamento streaming direto para arquivos 1GB+ sem usar RAM"""
+    try:
+        file.seek(0)
+        total_valid = 0
+        linha_buffer = ""
+        chunk_size = 8192  # 8KB chunks muito pequenos
+        
+        print("🔥 MODO STREAMING: Processando direto para SQLite...")
+        
+        # Conexões SQLite otimizadas para streaming
+        conn = sqlite3.connect(session['databases']['main'])
+        conn_domains = sqlite3.connect(session['databases']['domains'])
+        conn_br = sqlite3.connect(session['databases']['brazilian'])
+        
+        # Configuração máxima performance para 1GB+
+        for db in [conn, conn_domains, conn_br]:
+            db.execute('PRAGMA journal_mode=OFF')
+            db.execute('PRAGMA synchronous=OFF')
+            db.execute('PRAGMA cache_size=100000')  # 100MB cache
+            db.execute('PRAGMA temp_store=MEMORY')
+            db.execute('PRAGMA mmap_size=1073741824')  # 1GB mmap
+            db.execute('BEGIN TRANSACTION')
+        
+        cursor = conn.cursor()
+        cursor_domains = conn_domains.cursor()
+        cursor_br = conn_br.cursor()
+        
+        batch_data = []
+        batch_count = 0
+        
+        while True:
+            # Lê chunk minúsculo
+            chunk = file.read(chunk_size)
+            if not chunk:
+                break
+            
+            try:
+                chunk_text = chunk.decode('utf-8', errors='ignore')
+            except:
+                continue
+                
+            linha_buffer += chunk_text
+            
+            # Processa linhas completas uma por uma
+            while '\n' in linha_buffer:
+                linha, linha_buffer = linha_buffer.split('\n', 1)
+                linha_limpa = linha.strip()
+                
+                if not linha_limpa or not linha_valida(linha_limpa):
+                    continue
+                
+                try:
+                    partes = linha_limpa.split(':')
+                    if linha_limpa.startswith(('https://', 'http://')):
+                        url = ':'.join(partes[:-2])
+                        username, password = partes[-2], partes[-1]
+                    else:
+                        url, username, password = partes[0], partes[1], partes[2]
+                    
+                    batch_data.append((url, username, password, linha_limpa))
+                    
+                    # Checa brasileiro
+                    if any(br in url.lower() for br in ['.br', '.com.br', 'uol.com', 'globo.com']):
+                        cursor_br.execute('INSERT INTO brazilian_urls (url, linha_completa) VALUES (?, ?)', (url, linha_limpa))
+                    
+                    # Domínio
+                    try:
+                        if url.startswith(('http://', 'https://')):
+                            domain = urlparse(url).netloc
+                        else:
+                            domain = url.split('/')[0]
+                        if domain:
+                            cursor_domains.execute('INSERT OR IGNORE INTO domains (domain) VALUES (?)', (domain,))
+                            cursor_domains.execute('UPDATE domains SET count = count + 1 WHERE domain = ?', (domain,))
+                    except:
+                        pass
+                        
+                    batch_count += 1
+                    
+                    # Insert micro-batch a cada 100 linhas para não acumular RAM
+                    if len(batch_data) >= 100:
+                        cursor.executemany('INSERT INTO credentials (url, username, password, linha_completa) VALUES (?, ?, ?, ?)', batch_data)
+                        total_valid += len(batch_data)
+                        batch_data.clear()  # Limpa imediatamente
+                        
+                        # Commit frequente para streaming
+                        if batch_count % 10000 == 0:
+                            for db in [conn, conn_domains, conn_br]:
+                                db.commit()
+                                db.execute('BEGIN TRANSACTION')
+                            print(f"   🚀 STREAM: {total_valid:,} processadas...")
+                            
+                except:
+                    continue
+            
+            # Libera chunk imediatamente
+            del chunk, chunk_text
+        
+        # Insert final do batch restante
+        if batch_data:
+            cursor.executemany('INSERT INTO credentials (url, username, password, linha_completa) VALUES (?, ?, ?, ?)', batch_data)
+            total_valid += len(batch_data)
+        
+        # Commit final
+        for db in [conn, conn_domains, conn_br]:
+            db.commit()
+            db.close()
+        
+        print(f"✅ STREAMING COMPLETO: {total_valid:,} linhas válidas processadas!")
+        return total_valid
+        
+    except Exception as e:
+        print(f"✗ Erro no streaming: {str(e)[:100]}")
+        return 0
+
+
     # Atualiza última atividade
     IP_SESSIONS[ip_hash]['last_activity'] = datetime.now()
     
@@ -844,17 +962,36 @@ html_form = """
 """
 
 def extrair_arquivo_comprimido(file):
+    """Extração otimizada para arquivos de até 1GB+ usando streaming"""
     try:
-        file_size_mb = len(file.read()) / (1024 * 1024)
-        file.seek(0)  # Reset file pointer
+        # Calcula tamanho do arquivo
+        file.seek(0, 2)  # Vai para o final
+        file_size = file.tell()
+        file.seek(0)  # Volta para o início
+        file_size_mb = file_size / (1024 * 1024)
         
-        print(f"➤ Extraindo arquivo: {file.filename} ({file_size_mb:.1f}MB)")
+        print(f"➤ Extraindo: {file.filename} ({file_size_mb:.1f}MB)")
         
-        # Para arquivos grandes (>100MB), processa linha por linha
-        if file_size_mb > 100:
-            print(f"📈 Arquivo grande detectado, processando otimizado...")
+        # Para arquivos gigantes (>500MB), usa processamento ultra-otimizado
+        if file_size_mb > 500:
+            print(f"🚀 ARQUIVO GIGANTE detectado! Processamento streaming...")
+            return processar_arquivo_gigante(file, file_size_mb)
+        
+        # Para arquivos grandes (>50MB), usa chunks otimizados
+        elif file_size_mb > 50:
+            print(f"📈 Arquivo grande detectado, processamento em chunks...")
             return extrair_arquivo_grande(file)
         
+        # Arquivos pequenos (<50MB) - processamento normal
+        return extrair_arquivo_normal(file)
+        
+    except Exception as e:
+        print(f"✗ Erro geral na extração: {str(e)[:50]}")
+        return []
+
+def extrair_arquivo_normal(file):
+    """Processamento normal para arquivos <50MB"""
+    try:
         linhas = []
         
         if file.filename.lower().endswith('.zip'):
@@ -864,50 +1001,72 @@ def extrair_arquivo_comprimido(file):
                         with zip_ref.open(file_info) as txt_file:
                             content = txt_file.read().decode('utf-8', errors='ignore')
                             linhas.extend(content.splitlines())
-                            del content  # Libera memória
+                            del content
         elif file.filename.lower().endswith('.rar'):
-            try:
-                content = file.read().decode('utf-8', errors='ignore')
-                linhas.extend(content.splitlines())
-                del content  # Libera memória
-            except:
-                print(f"✗ Erro no arquivo RAR: {file.filename}")
-                return []
+            content = file.read().decode('utf-8', errors='ignore')
+            linhas.extend(content.splitlines())
+            del content
         else:  # .txt
             content = file.read().decode('utf-8', errors='ignore')
             linhas.extend(content.splitlines())
-            del content  # Libera memória
+            del content
         
-        print(f"✓ Extraído: {len(linhas):,} linhas de {file.filename}")
+        print(f"✓ Extraído: {len(linhas):,} linhas")
         return linhas
         
-    except MemoryError:
-        print(f"💾 Arquivo muito grande para memória: {file.filename}")
-        return extrair_arquivo_grande(file)
     except Exception as e:
-        print(f"✗ Erro ao extrair {file.filename}: {str(e)[:50]}")
+        print(f"✗ Erro extração normal: {str(e)[:50]}")
         return []
 
 def extrair_arquivo_grande(file):
-    """Extrai arquivos grandes linha por linha para economizar RAM"""
+    """Processamento em chunks para arquivos 50-500MB"""
     try:
         file.seek(0)
-        content = file.read().decode('utf-8', errors='ignore')
         
-        # Divide em chunks menores
-        chunk_size = 100000  # 100k linhas por vez
-        linhas = content.splitlines()
-        total_lines = len(linhas)
+        # Lê em chunks de 10MB para não explodir a RAM
+        chunk_size = 10 * 1024 * 1024  # 10MB chunks
+        linhas = []
+        buffer = ""
         
-        print(f"🔄 Processamento otimizado: {total_lines:,} linhas em chunks de {chunk_size:,}")
+        while True:
+            chunk = file.read(chunk_size)
+            if not chunk:
+                break
+                
+            # Decodifica chunk
+            chunk_text = chunk.decode('utf-8', errors='ignore')
+            buffer += chunk_text
+            
+            # Processa linhas completas
+            while '\n' in buffer:
+                linha, buffer = buffer.split('\n', 1)
+                if linha.strip():
+                    linhas.append(linha.strip())
+            
+            # Libera chunk da memória
+            del chunk, chunk_text
         
-        # Libera memória do conteúdo original
-        del content
+        # Processa última linha se existir
+        if buffer.strip():
+            linhas.append(buffer.strip())
         
+        print(f"✓ Extraído em chunks: {len(linhas):,} linhas")
         return linhas
         
     except Exception as e:
-        print(f"✗ Erro no processamento otimizado: {str(e)[:50]}")
+        print(f"✗ Erro extração grande: {str(e)[:50]}")
+        return []
+
+def processar_arquivo_gigante(file, file_size_mb):
+    """Processamento streaming direto para SQLite (1GB+) sem carregar na RAM"""
+    try:
+        print(f"🚀 STREAMING DIRETO: {file_size_mb:.1f}MB direto para SQLite")
+        
+        # Retorna flag especial para processamento direto
+        return "STREAMING_GIGANTE"
+        
+    except Exception as e:
+        print(f"✗ Erro processamento gigante: {str(e)[:50]}")
         return []
 
 def linha_valida(linha):
@@ -986,38 +1145,49 @@ def upload_file():
                 if file and file.filename and file.filename.lower().endswith((".txt", ".rar", ".zip")):
                     try:
                         content = extrair_arquivo_comprimido(file)
+                        
+                        # Processamento especial para arquivos gigantes
+                        if content == "STREAMING_GIGANTE":
+                            print(f"🚀 PROCESSAMENTO DIRETO 1GB+: {file.filename}")
+                            total_valid = processar_streaming_direto(file, session, ip_hash)
+                            total_filtradas += total_valid
+                            arquivos_processados.append(f"{file.filename} ({total_valid:,} válidas - STREAMING)")
+                            continue
+                        
                         if not content:
                             continue
                             
-                        print(f"➤ Validando linhas de {file.filename} ({len(content):,} linhas)...")
+                        print(f"➤ Validando {len(content):,} linhas de {file.filename}...")
                         
-                        # Otimizado para arquivos grandes (1GB+)
-                        batch_size = 5000  # Aumentado para melhor performance
+                        # Processamento ultra-otimizado para RAM limitada
+                        batch_size = 1000  # Chunks menores para 1GB
                         total_valid = 0
                         
-                        # Abre conexões SQLite uma vez com otimizações
+                        # Conexões SQLite com configuração de alta performance
                         conn = sqlite3.connect(session['databases']['main'])
                         conn_domains = sqlite3.connect(session['databases']['domains'])
+                        conn_br = sqlite3.connect(session['databases']['brazilian'])
                         
-                        # Otimizações SQLite para arquivos grandes
-                        conn.execute('PRAGMA journal_mode=WAL')
-                        conn.execute('PRAGMA synchronous=NORMAL')
-                        conn.execute('PRAGMA cache_size=10000')
-                        conn.execute('PRAGMA temp_store=MEMORY')
-                        
-                        conn_domains.execute('PRAGMA journal_mode=WAL')
-                        conn_domains.execute('PRAGMA synchronous=NORMAL')
+                        # Configurações SQLite para arquivos gigantes
+                        for db_conn in [conn, conn_domains, conn_br]:
+                            db_conn.execute('PRAGMA journal_mode=OFF')  # Mais rápido para bulk
+                            db_conn.execute('PRAGMA synchronous=OFF')   # Máxima velocidade
+                            db_conn.execute('PRAGMA cache_size=50000')  # Cache grande
+                            db_conn.execute('PRAGMA temp_store=MEMORY')
+                            db_conn.execute('PRAGMA mmap_size=268435456')  # 256MB mmap
                         
                         cursor = conn.cursor()
                         cursor_domains = conn_domains.cursor()
+                        cursor_br = conn_br.cursor()
                         
-                        # Processamento em chunks menores para economizar RAM
+                        # Processa em micro-batches para não estourar RAM
                         for i in range(0, len(content), batch_size):
                             batch = content[i:i + batch_size]
                             batch_data = []
-                            domains_data = set()
+                            domains_set = set()
+                            br_data = []
                             
-                            # Filtra e prepara dados em uma única passada
+                            # Validação e preparação otimizada
                             for linha in batch:
                                 linha_limpa = linha.strip()
                                 if not linha_limpa or not linha_valida(linha_limpa):
@@ -1033,6 +1203,10 @@ def upload_file():
 
                                     batch_data.append((url, username, password, linha_limpa))
                                     
+                                    # Checa se é brasileiro
+                                    if any(br in url.lower() for br in ['.br', '.com.br', 'uol.com', 'globo.com', 'brasil']):
+                                        br_data.append((url, linha_limpa))
+                                    
                                     # Extrai domínio
                                     try:
                                         if url.startswith(('http://', 'https://')):
@@ -1040,67 +1214,56 @@ def upload_file():
                                         else:
                                             domain = url.split('/')[0]
                                         if domain:
-                                            domains_data.add(domain)
+                                            domains_set.add(domain)
                                     except:
                                         pass
                                 except:
                                     continue
                             
-                            # Insert em lote para credenciais
+                            # Inserts em lote ultra-rápidos
                             if batch_data:
-                                cursor.executemany('''
-                                INSERT INTO credentials (url, username, password, linha_completa)
-                                VALUES (?, ?, ?, ?)
-                                ''', batch_data)
+                                cursor.executemany('INSERT INTO credentials (url, username, password, linha_completa) VALUES (?, ?, ?, ?)', batch_data)
                             
-                            # Insert em lote para domínios
-                            for domain in domains_data:
-                                cursor_domains.execute('''
-                                INSERT OR IGNORE INTO domains (domain) VALUES (?)
-                                ''', (domain,))
-                                cursor_domains.execute('''
-                                UPDATE domains SET count = count + 1 WHERE domain = ?
-                                ''', (domain,))
+                            if br_data:
+                                cursor_br.executemany('INSERT INTO brazilian_urls (url, linha_completa) VALUES (?, ?)', br_data)
+                            
+                            for domain in domains_set:
+                                cursor_domains.execute('INSERT OR IGNORE INTO domains (domain) VALUES (?)', (domain,))
+                                cursor_domains.execute('UPDATE domains SET count = count + 1 WHERE domain = ?', (domain,))
                             
                             total_valid += len(batch_data)
                             
-                            # Commit a cada 10 batches para melhor performance
-                            if i % (batch_size * 10) == 0:
+                            # Commit mais frequente para arquivos grandes
+                            if i % (batch_size * 5) == 0:  # A cada 5k linhas
                                 conn.commit()
                                 conn_domains.commit()
-                                print(f"   ⚡ Processadas {i + len(batch):,}/{len(content):,} linhas... ({total_valid:,} válidas)")
+                                conn_br.commit()
+                                print(f"   💾 Salvo: {i + len(batch):,}/{len(content):,} ({total_valid:,} válidas)")
                             
-                            # Limpa batch da memória
-                            del batch_data, domains_data, batch
+                            # Limpa memória imediatamente
+                            del batch_data, domains_set, br_data, batch
                         
                         # Commit final
                         conn.commit()
                         conn_domains.commit()
+                        conn_br.commit()
                         conn.close()
                         conn_domains.close()
+                        conn_br.close()
                         
-                        # Libera memória do conteúdo original
+                        # Libera content da memória
                         del content
                         
-                        print(f"   ✅ Total válidas: {total_valid:,}")
-                        
-                        # Processa URLs brasileiras
-                        urls_br = filtrar_urls_brasileiras(filtradas)
-                        if urls_br:
-                            conn_br = sqlite3.connect(session['databases']['brazilian'])
-                            cursor_br = conn_br.cursor()
-                            for url_br in urls_br:
-                                cursor_br.execute('''
-                                INSERT INTO brazilian_urls (url, linha_completa) VALUES (?, ?)
-                                ''', (url_br.split(':')[0], url_br))
-                            conn_br.commit()
-                            conn_br.close()
-                        
+                        print(f"   ✅ Total processado: {total_valid:,} válidas")
                         total_filtradas += total_valid
-                        taxa = (total_valid / len(content) * 100) if content else 0
-                        print(f"✓ {file.filename}: {total_valid} válidas ({taxa:.1f}%)")
-                        arquivos_processados.append(f"{file.filename} ({total_valid} válidas)")
+                        taxa = (total_valid / len(content) * 100) if len(content) > 0 else 0
+                        arquivos_processados.append(f"{file.filename} ({total_valid:,} válidas)")
                         
+                    except MemoryError:
+                        print(f"💾 ERRO RAM: {file.filename} - Tentando streaming direto...")
+                        total_valid = processar_streaming_direto(file, session, ip_hash)
+                        total_filtradas += total_valid
+                        arquivos_processados.append(f"{file.filename} ({total_valid:,} - STREAM)")
                     except Exception as e:
                         print(f"✗ Erro em {file.filename}: {str(e)[:50]}")
                         arquivos_processados.append(f"{file.filename} (erro)")
