@@ -63,14 +63,21 @@ init_cleanup()
 # Pasta de uploads não é mais criada - tudo é processado em memória
 # UPLOAD_FOLDER removido - arquivos são temporários
 
-# Lista que acumula as linhas válidas
-all_lines = []
-
-# Nome do arquivo final (personalizado pelo usuário)
-nome_arquivo_final = "resultado_final"
+# Sistema de processamento em memória - sem arquivos salvos
+session_data = {
+    'all_lines': [],
+    'nome_arquivo_final': "resultado_final",
+    'last_processed': None,
+    'stats': {
+        'total_lines': 0,
+        'valid_lines': 0,
+        'brazilian_urls': 0,
+        'domains': {}
+    }
+}
 
 # Limite máximo de linhas acumuladas
-MAX_LINES = 60000000  # 5 milhões
+MAX_LINES = 5000000  # 5 milhões
 
 # HTML da interface com Bootstrap styling
 html_form = """
@@ -414,7 +421,7 @@ html_form = """
                             <div class="mb-4">
                                 <div class="stats-badge d-inline-block">
                                     <i class="fas fa-chart-line me-2"></i>
-                                    <strong>""" + f"{len(all_lines):,}" + """</strong> linhas processadas
+                                    <strong>""" + f"{len(session_data['all_lines']):,}" + """</strong> linhas processadas
                                 </div>
                                 <br>
                                 <small class="text-muted mt-2 d-block">
@@ -605,13 +612,14 @@ def linha_valida(linha: str) -> bool:
 
 @app.route("/", methods=["GET", "POST"])
 def upload_file():
-    global all_lines
+    global session_data
     if request.method == "POST":
         try:
-            # Pega o nome do arquivo final
+            # Pega o nome do arquivo final e salva na sessão
             filename = request.form.get("filename", "resultado_final").strip()
             if not filename:
                 filename = "resultado_final"
+            session_data['nome_arquivo_final'] = filename
             
             # Processa múltiplos arquivos
             arquivos_processados = []
@@ -637,7 +645,7 @@ def upload_file():
                                 linhas_processadas += 1
                                 if linha_valida(linha_limpa):
                                     # Verifica se não ultrapassou o limite
-                                    if len(all_lines) + len(filtradas) >= MAX_LINES:
+                                    if len(session_data['all_lines']) + len(filtradas) >= MAX_LINES:
                                         app.logger.info(f"Limite de {MAX_LINES:,} linhas atingido!")
                                         break
                                     filtradas.append(linha_limpa)
@@ -674,13 +682,13 @@ def upload_file():
                             app.logger.warning(f"   Possível formato não suportado ou dados corrompidos")
                         
                         # adiciona ao acumulador
-                        linhas_antes = len(all_lines)
-                        all_lines.extend(filtradas)
+                        linhas_antes = len(session_data['all_lines'])
+                        session_data['all_lines'].extend(filtradas)
                         total_filtradas += len(filtradas)
                         arquivos_processados.append(f"{file.filename} ({len(filtradas)} válidas)")
                         
                         # Para se atingiu o limite
-                        if len(all_lines) >= MAX_LINES:
+                        if len(session_data['all_lines']) >= MAX_LINES:
                             app.logger.info(f"Limite máximo de {MAX_LINES:,} linhas atingido! Parando processamento.")
                             break
                         
@@ -688,7 +696,7 @@ def upload_file():
                         app.logger.error(f"Erro ao processar arquivo {file.filename}: {e}")
                         arquivos_processados.append(f"{file.filename} (erro)")
             
-            app.logger.info(f"Total acumulado: {len(all_lines)}")
+            app.logger.info(f"Total acumulado: {len(session_data['all_lines'])}")
             
             if not arquivos_processados:
                 # Nenhum arquivo foi enviado
@@ -818,7 +826,7 @@ def upload_file():
                                             <div class="p-3 rounded-3" style="background: rgba(102, 126, 234, 0.2);">
                                                 <i class="fas fa-database mb-2" style="color: #667eea;"></i>
                                                 <h6 class="text-white">Total Acumulado</h6>
-                                                <h4 class="text-white">{len(all_lines):,}</h4>
+                                                <h4 class="text-white">{len(session_data['all_lines']):,}</h4>
                                             </div>
                                         </div>
                                     </div>
@@ -894,7 +902,7 @@ def upload_file():
 @app.route("/download")
 def download():
     try:
-        if not all_lines:
+        if not session_data['all_lines']:
             # Erro se não há linhas para download
             error_html = """
             <!doctype html>
@@ -936,7 +944,7 @@ def download():
         global nome_arquivo_final
         
         # Mantém todas as linhas como foram processadas
-        linhas_finais = all_lines
+        linhas_finais = session_data['all_lines']
         linhas_finais_count = len(linhas_finais)
         
         app.logger.info(f"Salvando arquivo com todas as {linhas_finais_count:,} linhas processadas (sem otimização)")
@@ -1311,9 +1319,9 @@ def download_db(filename):
 @app.route("/filter-br")
 def filter_br():
     """Rota para filtrar apenas URLs brasileiras"""
-    global all_lines
+    global session_data
     
-    if not all_lines:
+    if not session_data['all_lines']:
         return render_template_string("""
         <!doctype html>
         <html lang="pt-BR" data-bs-theme="dark">
@@ -1337,7 +1345,7 @@ def filter_br():
         """)
     
     # Filtra URLs brasileiras
-    urls_br = filtrar_urls_brasileiras(all_lines)
+    urls_br = filtrar_urls_brasileiras(session_data['all_lines'])
     
     # Cria arquivo temporário com URLs brasileiras
     nome_arquivo = f"urls_brasileiras_{len(urls_br)}"
@@ -1384,7 +1392,7 @@ def filter_br():
                             <div class="card-body p-4 text-center">
                                 <div class="alert alert-success border-0" style="background: rgba(40, 167, 69, 0.2); border-radius: 15px;">
                                     <i class="fas fa-check-circle me-2 fs-4"></i>
-                                    <strong>{len(urls_br):,}</strong> URLs brasileiras encontradas de <strong>{len(all_lines):,}</strong> total
+                                    <strong>{len(urls_br):,}</strong> URLs brasileiras encontradas de <strong>{len(session_data['all_lines']):,}</strong> total
                                 </div>
                                 
                                 <div class="d-grid gap-2 d-md-flex justify-content-md-center mt-4">
