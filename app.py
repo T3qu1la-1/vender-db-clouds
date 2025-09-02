@@ -336,14 +336,14 @@ def processar_streaming_direto(file, session, ip_hash):
 
 # ========== SISTEMA DE SHARDING SQLITE PARA UPLOADS GRANDES ==========
 
-def get_shard_connection(file_id: str, ip_hash: str, base_path=None):
-    """Cria conexão com shard SQLite baseado em hash para uploads grandes"""
+def get_shard_connection(linha_hash: str, ip_hash: str, base_path=None):
+    """Cria conexão com shard SQLite baseado em hash da linha para distribuição real"""
     if base_path is None:
         base_path = os.path.join(tempfile.gettempdir(), f"user_{ip_hash}")
     
-    # 4 shards por IP para distribuir carga
-    shard_num = int(hashlib.md5(f"{ip_hash}_{file_id}".encode()).hexdigest(), 16) % 4
-    db_path = os.path.join(base_path, f"shard_{shard_num}.db")
+    # Distribui baseado no hash da linha para distribuição uniforme
+    shard_num = int(hashlib.md5(linha_hash.encode()).hexdigest(), 16) % 4
+    db_path = os.path.join(base_path, f"upload_shard_{shard_num}.db")
     
     # Cria diretório se não existir
     os.makedirs(base_path, exist_ok=True)
@@ -367,15 +367,16 @@ def get_shard_connection(file_id: str, ip_hash: str, base_path=None):
         password TEXT NOT NULL,
         linha_completa TEXT NOT NULL,
         file_source TEXT,
+        shard_id INTEGER,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
     
     cursor.execute('''CREATE INDEX IF NOT EXISTS idx_url ON credentials(url)''')
-    cursor.execute('''CREATE INDEX IF NOT EXISTS idx_file_source ON credentials(file_source)''')
+    cursor.execute('''CREATE INDEX IF NOT EXISTS idx_shard ON credentials(shard_id)''')
     
     conn.commit()
-    return conn, db_path
+    return conn, db_path, shard_num
 
 def batch_insert_credentials_sharded(conn, data_batch, file_source, batch_size=2000):
     """Inserção em lote otimizada para credenciais usando sharding"""
@@ -814,7 +815,8 @@ html_form = """
                 </div>
                 <div>
                     <i class="fas fa-database me-2"></i>
-                    <span class="badge bg-success">4 SQLites Temporários</span>
+                    <span class="badge bg-success">8 SQLites</span>
+                    <small class="text-muted d-block">4 principais + 4 shards upload</small>
                 </div>
             </div>
         </div>
@@ -1068,12 +1070,16 @@ html_form = """
                         <div id="systemInfo" style="display: none;" class="alert alert-dark border-0 mt-4" style="background: rgba(52, 58, 64, 0.8); border-radius: 15px;">
                             <h5 class="text-light"><i class="fas fa-server me-2"></i>Sistema Multi-SQLite v4.0</h5>
                             <ul class="text-muted mb-0">
-                                <li>🗄️ <strong>main.db:</strong> Todas as credenciais processadas</li>
                                 <li>📊 <strong>stats.db:</strong> Estatísticas e contadores</li>
                                 <li>🇧🇷 <strong>brazilian.db:</strong> URLs brasileiras filtradas</li>
                                 <li>🌐 <strong>domains.db:</strong> Domínios únicos e contagens</li>
-                                <li>⏰ <strong>Auto-limpeza:</strong> 30 min de inatividade</li>
-                                <li>🔒 <strong>Isolamento:</strong> 1 IP = 1 conjunto de SQLites</li>
+                                <li>🗄️ <strong>main.db:</strong> Backup consolidado (opcional)</li>
+                                <li>📦 <strong>upload_shard_0.db:</strong> 25% dos dados (shard 0)</li>
+                                <li>📦 <strong>upload_shard_1.db:</strong> 25% dos dados (shard 1)</li>
+                                <li>📦 <strong>upload_shard_2.db:</strong> 25% dos dados (shard 2)</li>
+                                <li>📦 <strong>upload_shard_3.db:</strong> 25% dos dados (shard 3)</li>
+                                <li>⏰ <strong>Auto-limpeza:</strong> 20 min de inatividade</li>
+                                <li>🔒 <strong>Isolamento:</strong> 1 IP = 8 SQLites únicos</li>
                             </ul>
                         </div>
                     </div>
@@ -1332,28 +1338,49 @@ def upload_file():
                             
                         print(f"➤ Validando {len(content):,} linhas de {file.filename}...")
                         
-                        print(f"🚀 USANDO SHARDING OTIMIZADO para {file.filename} ({len(content):,} linhas)")
+                        print(f"🚀 DISTRIBUINDO ENTRE 4 SQLITES para {file.filename} ({len(content):,} linhas)")
                         
-                        # Processamento com sistema de sharding SQLite para performance máxima
-                        batch_size = 2000  # Batches maiores para melhor performance
-                        total_valid = 0
+                        # Abre conexões para os 4 shards simultaneamente
+                        shard_connections = {}
+                        for shard_num in range(4):
+                            db_path = os.path.join(os.path.dirname(session['databases']['main']), f"upload_shard_{shard_num}.db")
+                            conn = sqlite3.connect(db_path)
+                            optimize_sqlite_for_large_uploads(conn)
+                            
+                            # Cria tabela no shard
+                            cursor = conn.cursor()
+                            cursor.execute('''
+                            CREATE TABLE IF NOT EXISTS credentials (
+                                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                url TEXT NOT NULL,
+                                username TEXT NOT NULL,
+                                password TEXT NOT NULL,
+                                linha_completa TEXT NOT NULL,
+                                file_source TEXT,
+                                shard_id INTEGER,
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                            )
+                            ''')
+                            cursor.execute('''CREATE INDEX IF NOT EXISTS idx_shard ON credentials(shard_id)''')
+                            conn.commit()
+                            
+                            shard_connections[shard_num] = conn
+                            print(f"   📦 Shard {shard_num} preparado: {db_path}")
                         
-                        # Conexão com shard para este arquivo específico
-                        shard_conn, shard_path = get_shard_connection(file.filename, ip_hash)
-                        print(f"📦 Usando shard: {shard_path}")
-                        
-                        # Conexões auxiliares com otimizações PRAGMA
+                        # Conexões auxiliares
                         conn_domains = sqlite3.connect(session['databases']['domains'])
                         conn_br = sqlite3.connect(session['databases']['brazilian'])
                         
-                        # Aplica PRAGMA otimizações em todas as conexões
-                        for db_conn in [shard_conn, conn_domains, conn_br]:
+                        # Otimiza conexões auxiliares
+                        for db_conn in [conn_domains, conn_br]:
                             optimize_sqlite_for_large_uploads(db_conn)
                         
-                        # Processa em lotes otimizados
-                        batch_data = []
+                        # Distribui dados entre os 4 shards
+                        shard_batches = {0: [], 1: [], 2: [], 3: []}
                         domains_set = set()
                         br_data = []
+                        total_valid = 0
+                        batch_size = 1000
                         
                         for i, linha in enumerate(content):
                             linha_limpa = linha.strip()
@@ -1368,13 +1395,16 @@ def upload_file():
                                 else:
                                     url, username, password = partes[0], partes[1], partes[2]
 
-                                batch_data.append((url, username, password, linha_limpa))
+                                # Determina shard baseado no hash da linha
+                                linha_hash = hashlib.md5(linha_limpa.encode()).hexdigest()
+                                shard_num = int(linha_hash, 16) % 4
                                 
-                                # Checa se é brasileiro
+                                shard_batches[shard_num].append((url, username, password, linha_limpa, file.filename, shard_num))
+                                
+                                # Dados auxiliares
                                 if any(br in url.lower() for br in ['.br', '.com.br', 'uol.com', 'globo.com', 'brasil']):
                                     br_data.append((url, linha_limpa))
                                 
-                                # Extrai domínio
                                 try:
                                     if url.startswith(('http://', 'https://')):
                                         domain = urlparse(url).netloc
@@ -1384,56 +1414,73 @@ def upload_file():
                                         domains_set.add(domain)
                                 except:
                                     pass
+                                    
                             except:
                                 continue
                             
-                            # Insere em lotes usando sharding otimizado
-                            if len(batch_data) >= batch_size:
-                                # Usa função de batch insert otimizada
-                                inserted = batch_insert_credentials_sharded(shard_conn, batch_data, file.filename)
-                                total_valid += inserted
+                            # Processa lotes quando atingir tamanho
+                            total_items = sum(len(batch) for batch in shard_batches.values())
+                            if total_items >= batch_size * 4:
                                 
-                                # Insere dados auxiliares
-                                if br_data:
-                                    cursor_br = conn_br.cursor()
-                                    cursor_br.executemany('INSERT INTO brazilian_urls (url, linha_completa) VALUES (?, ?)', br_data)
-                                    conn_br.commit()
+                                # Insere em cada shard
+                                for shard_num, batch_data in shard_batches.items():
+                                    if batch_data:
+                                        cursor = shard_connections[shard_num].cursor()
+                                        cursor.executemany('''
+                                        INSERT INTO credentials (url, username, password, linha_completa, file_source, shard_id)
+                                        VALUES (?, ?, ?, ?, ?, ?)
+                                        ''', batch_data)
+                                        shard_connections[shard_num].commit()
+                                        total_valid += len(batch_data)
+                                        
+                                        print(f"   📊 Shard {shard_num}: +{len(batch_data):,} registros")
                                 
-                                cursor_domains = conn_domains.cursor()
-                                for domain in domains_set:
-                                    cursor_domains.execute('INSERT OR IGNORE INTO domains (domain) VALUES (?)', (domain,))
-                                    cursor_domains.execute('UPDATE domains SET count = count + 1 WHERE domain = ?', (domain,))
-                                conn_domains.commit()
-                                
-                                print(f"   📦 Shard processado: {len(batch_data):,} registros ({total_valid:,} total)")
-                                
-                                # Limpa lotes para próxima iteração
-                                batch_data, br_data, domains_set = [], [], set()
+                                # Limpa batches
+                                shard_batches = {0: [], 1: [], 2: [], 3: []}
                         
-                        # Processa lote final
-                        if batch_data:
-                            inserted = batch_insert_credentials_sharded(shard_conn, batch_data, file.filename)
-                            total_valid += inserted
-                            
-                            if br_data:
-                                cursor_br = conn_br.cursor()
-                                cursor_br.executemany('INSERT INTO brazilian_urls (url, linha_completa) VALUES (?, ?)', br_data)
-                                conn_br.commit()
-                            
-                            cursor_domains = conn_domains.cursor()
-                            for domain in domains_set:
-                                cursor_domains.execute('INSERT OR IGNORE INTO domains (domain) VALUES (?)', (domain,))
-                                cursor_domains.execute('UPDATE domains SET count = count + 1 WHERE domain = ?', (domain,))
-                            conn_domains.commit()
+                        # Processa lotes finais
+                        for shard_num, batch_data in shard_batches.items():
+                            if batch_data:
+                                cursor = shard_connections[shard_num].cursor()
+                                cursor.executemany('''
+                                INSERT INTO credentials (url, username, password, linha_completa, file_source, shard_id)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                                ''', batch_data)
+                                shard_connections[shard_num].commit()
+                                total_valid += len(batch_data)
+                                print(f"   📊 Shard {shard_num} FINAL: +{len(batch_data):,} registros")
                         
-                        # Fecha conexões
-                        shard_conn.close()
+                        # Insere dados auxiliares
+                        if br_data:
+                            cursor_br = conn_br.cursor()
+                            cursor_br.executemany('INSERT INTO brazilian_urls (url, linha_completa) VALUES (?, ?)', br_data)
+                            conn_br.commit()
+                        
+                        cursor_domains = conn_domains.cursor()
+                        for domain in domains_set:
+                            cursor_domains.execute('INSERT OR IGNORE INTO domains (domain) VALUES (?)', (domain,))
+                            cursor_domains.execute('UPDATE domains SET count = count + 1 WHERE domain = ?', (domain,))
+                        conn_domains.commit()
+                        
+                        # Fecha todas as conexões
+                        for conn in shard_connections.values():
+                            conn.close()
                         conn_domains.close()
                         conn_br.close()
                         
-                        # Consolida shards no banco principal após processamento
-                        print(f"🔄 Consolidando shards no banco principal...")
-                        consolidate_shards(ip_hash, session['databases']['main'])
+                        # Exibe distribuição final
+                        print(f"🎯 DISTRIBUIÇÃO FINAL:")
+                        for shard_num in range(4):
+                            db_path = os.path.join(os.path.dirname(session['databases']['main']), f"upload_shard_{shard_num}.db")
+                            if os.path.exists(db_path):
+                                conn_check = sqlite3.connect(db_path)
+                                cursor_check = conn_check.cursor()
+                                cursor_check.execute('SELECT COUNT(*) FROM credentials')
+                                count = cursor_check.fetchone()[0]
+                                conn_check.close()
+                                print(f"   📦 Shard {shard_num}: {count:,} registros")
+                        
+                        # NÃO consolidar - manter distribuído nos 4 shards
                         
                         # Libera content da memória
                         del content
@@ -1552,25 +1599,55 @@ def upload_file():
 def download():
     user_ip = get_user_ip()
     session = get_user_session(user_ip)
+    ip_hash = get_ip_hash(user_ip)
     
     try:
-        conn = sqlite3.connect(session['databases']['main'])
-        cursor = conn.cursor()
-        cursor.execute('SELECT linha_completa FROM credentials')
-        results = cursor.fetchall()
-        conn.close()
+        # Coleta dados dos 4 shards distribuídos
+        all_lines = []
+        shard_counts = []
         
-        if not results:
-            return "❌ Nenhuma linha processada", 404
+        for shard_num in range(4):
+            shard_path = os.path.join(os.path.dirname(session['databases']['main']), f"upload_shard_{shard_num}.db")
+            if os.path.exists(shard_path):
+                conn = sqlite3.connect(shard_path)
+                cursor = conn.cursor()
+                cursor.execute('SELECT linha_completa FROM credentials ORDER BY id')
+                results = cursor.fetchall()
+                
+                shard_lines = [row[0] for row in results]
+                all_lines.extend(shard_lines)
+                shard_counts.append(len(shard_lines))
+                conn.close()
+                
+                print(f"   📦 Shard {shard_num}: {len(shard_lines):,} linhas coletadas")
+            else:
+                shard_counts.append(0)
         
-        linhas = [row[0] for row in results]
-        file_content = "\n".join(linhas)
+        # Também verifica main.db para compatibilidade
+        try:
+            conn = sqlite3.connect(session['databases']['main'])
+            cursor = conn.cursor()
+            cursor.execute('SELECT linha_completa FROM credentials')
+            main_results = cursor.fetchall()
+            if main_results:
+                main_lines = [row[0] for row in main_results]
+                all_lines.extend(main_lines)
+                print(f"   📋 Main.db: {len(main_lines):,} linhas coletadas")
+            conn.close()
+        except:
+            pass
+        
+        if not all_lines:
+            return "❌ Nenhuma linha processada nos shards", 404
+        
+        file_content = "\n".join(all_lines)
         
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as tmp_file:
             tmp_file.write(file_content)
             tmp_path = tmp_file.name
 
-        print(f"✓ Download preparado: {len(linhas)} linhas do SQLite principal")
+        print(f"✓ Download dos 4 shards preparado: {len(all_lines):,} linhas totais")
+        print(f"   📊 Distribuição: Shard0:{shard_counts[0]:,} | Shard1:{shard_counts[1]:,} | Shard2:{shard_counts[2]:,} | Shard3:{shard_counts[3]:,}")
         
         def cleanup():
             try:
@@ -1580,10 +1657,10 @@ def download():
                 pass
         
         threading.Timer(30.0, cleanup).start()
-        return send_file(tmp_path, as_attachment=True, download_name="resultado_completo.txt")
+        return send_file(tmp_path, as_attachment=True, download_name=f"resultado_4shards_{ip_hash}.txt")
         
     except Exception as e:
-        print(f"✗ Erro no download: {e}")
+        print(f"✗ Erro no download dos shards: {e}")
         return "❌ Erro ao gerar download", 500
 
 @app.route("/filter-br")
@@ -1640,15 +1717,31 @@ def download_all_dbs():
     ip_hash = get_ip_hash(user_ip)
     
     try:
-        # Cria ZIP com todos os SQLites
+        # Cria ZIP com todos os SQLites incluindo os 4 shards
         zip_path = os.path.join(tempfile.gettempdir(), f"sqlites_{ip_hash}.zip")
         
         with zipfile.ZipFile(zip_path, 'w') as zip_file:
+            # SQLites principais
             for db_name, db_path in session['databases'].items():
                 if os.path.exists(db_path):
                     zip_file.write(db_path, f"{db_name}.db")
+                    print(f"   📦 Adicionado: {db_name}.db")
+            
+            # Adiciona os 4 shards de upload
+            for shard_num in range(4):
+                shard_path = os.path.join(os.path.dirname(session['databases']['main']), f"upload_shard_{shard_num}.db")
+                if os.path.exists(shard_path):
+                    zip_file.write(shard_path, f"upload_shard_{shard_num}.db")
+                    
+                    # Mostra estatísticas do shard
+                    conn = sqlite3.connect(shard_path)
+                    cursor = conn.cursor()
+                    cursor.execute('SELECT COUNT(*) FROM credentials')
+                    count = cursor.fetchone()[0]
+                    conn.close()
+                    print(f"   📊 Shard {shard_num}: {count:,} registros")
         
-        print(f"✓ Pack SQLites criado para IP {ip_hash}")
+        print(f"✓ Pack completo (8 SQLites) criado para IP {ip_hash}")
         
         def cleanup():
             try:
@@ -1658,7 +1751,7 @@ def download_all_dbs():
                 pass
         
         threading.Timer(60.0, cleanup).start()
-        return send_file(zip_path, as_attachment=True, download_name=f"pack_sqlites_{ip_hash}.zip")
+        return send_file(zip_path, as_attachment=True, download_name=f"pack_8sqlites_{ip_hash}.zip")
         
     except Exception as e:
         print(f"✗ Erro ao criar pack SQLites: {e}")
