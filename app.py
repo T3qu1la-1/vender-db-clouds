@@ -460,14 +460,124 @@ def extrair_arquivo_comprimido(file):
     return linhas
 
 def filtrar_urls_brasileiras(linhas):
-    """Filtra apenas URLs que contêm domínios brasileiros (.br)"""
+    """Filtra URLs brasileiras usando detecção avançada"""
     urls_brasileiras = []
-    dominios_br = ['.br', '.com.br', '.org.br', '.net.br', '.gov.br', '.edu.br']
+    
+    # Domínios brasileiros conhecidos
+    dominios_br = [
+        '.br', '.com.br', '.org.br', '.net.br', '.gov.br', '.edu.br',
+        '.mil.br', '.art.br', '.rec.br', '.esp.br', '.etc.br'
+    ]
+    
+    # Sites/empresas brasileiros populares (sem .br)
+    sites_brasileiros = [
+        'uol.com', 'globo.com', 'terra.com.br', 'ig.com.br', 'bol.com.br',
+        'abril.com.br', 'estadao.com.br', 'folha.uol.com.br', 'g1.globo.com',
+        'mercadolivre.com.br', 'mercadolibre.com.br', 'americanas.com.br',
+        'magazineluiza.com.br', 'casasbahia.com.br', 'pontofrio.com.br',
+        'submarino.com.br', 'shoptime.com.br', 'extra.com.br',
+        'itau.com.br', 'bradesco.com.br', 'bb.com.br', 'santander.com.br',
+        'caixa.gov.br', 'nubank.com.br', 'inter.co', 'picpay.com',
+        'correios.com.br', 'cep.com.br', 'viacep.com.br',
+        'globoplay.globo.com', 'netflix.com/br', 'primevideo.com',
+        'spotify.com/br', 'deezer.com/br',
+        'facebook.com/br', 'instagram.com/br', 'whatsapp.com/br',
+        'twitter.com/br', 'youtube.com/br', 'tiktok.com/br',
+        'linkedin.com/br', 'pinterest.com/br',
+        'olx.com.br', 'webmotors.com.br', 'imovelweb.com.br',
+        'trivago.com.br', 'booking.com/br', 'decolar.com',
+        'latam.com', 'gol.com.br', 'azul.com.br',
+        'cpf.receita.fazenda.gov.br', 'detran', 'tse.jus.br',
+        'inss.gov.br', 'gov.br', 'receita.fazenda.gov.br'
+    ]
+    
+    # Palavras-chave brasileiras em URLs/domínios
+    palavras_br = [
+        'brasil', 'brazil', 'br_', '_br', 'saopaulo', 'riodejaneiro',
+        'minasgerais', 'parana', 'bahia', 'goias', 'ceara',
+        'pernambuco', 'maranhao', 'paraiba', 'alagoas', 'sergipe',
+        'rondonia', 'acre', 'amazonas', 'roraima', 'para', 'amapa',
+        'tocantins', 'mato', 'grosso', 'distrito', 'federal',
+        'rio_grande', 'santa_catarina', 'espirito_santo'
+    ]
+
+    # Bancos e empresas brasileiras (sem domínio específico)
+    empresas_br = [
+        'itau', 'bradesco', 'santander', 'nubank', 'inter', 'picpay',
+        'caixa', 'bb', 'sicoob', 'sicredi', 'banrisul', 'banese',
+        'banpara', 'brb', 'banese', 'banestes',
+        'petrobras', 'vale', 'embraer', 'ambev', 'jbs', 'brf',
+        'magazine', 'luiza', 'americanas', 'submarino', 'casas', 'bahia',
+        'ponto', 'frio', 'extra', 'carrefour', 'walmart',
+        'globo', 'record', 'sbt', 'band', 'cultura',
+        'correios', 'detran', 'receita', 'inss', 'tse', 'trf',
+        'tj', 'mp', 'oab', 'crea', 'crc', 'crm'
+    ]
 
     for linha in linhas:
-        linha_limpa = linha.strip()
-        if any(dominio in linha_limpa.lower() for dominio in dominios_br):
-            urls_brasileiras.append(linha_limpa)
+        linha_limpa = linha.strip().lower()
+        url_parte = linha_limpa.split(':')[0] if ':' in linha_limpa else linha_limpa
+        
+        eh_brasileiro = False
+        
+        # 1. Verifica domínios .br
+        if any(dominio in linha_limpa for dominio in dominios_br):
+            eh_brasileiro = True
+            
+        # 2. Verifica sites brasileiros conhecidos
+        elif any(site in linha_limpa for site in sites_brasileiros):
+            eh_brasileiro = True
+            
+        # 3. Verifica palavras-chave brasileiras
+        elif any(palavra in linha_limpa for palavra in palavras_br):
+            eh_brasileiro = True
+            
+        # 4. Verifica nomes de empresas brasileiras
+        elif any(empresa in linha_limpa for empresa in empresas_br):
+            eh_brasileiro = True
+            
+        # 5. Padrões específicos brasileiros
+        elif any(padrao in linha_limpa for padrao in [
+            'cpf', 'cnpj', 'rg', 'cep', 'pix', 'boleto',
+            'cartorio', 'tabeliao', 'delegacia', 'prefeitura',
+            'camara', 'assembleia', 'senado', 'congresso',
+            'ministerio', 'secretaria', 'anvisa', 'anatel',
+            'cvm', 'bacen', 'banco_central', 'susep'
+        ]):
+            eh_brasileiro = True
+            
+        # 6. Códigos DDD brasileiros na URL (padrão comum)
+        elif any(ddd in linha_limpa for ddd in [
+            '011', '012', '013', '014', '015', '016', '017', '018', '019',
+            '021', '022', '024', '027', '028',
+            '031', '032', '033', '034', '035', '037', '038',
+            '041', '042', '043', '044', '045', '046',
+            '047', '048', '049',
+            '051', '053', '054', '055',
+            '061', '062', '064',
+            '065', '066',
+            '067',
+            '068',
+            '069',
+            '071', '073', '074', '075', '077',
+            '079',
+            '081', '087',
+            '082',
+            '083',
+            '084',
+            '085', '088',
+            '086',
+            '089',
+            '091', '093', '094',
+            '092', '097',
+            '095',
+            '096',
+            '098', '099'
+        ]):
+            eh_brasileiro = True
+
+        if eh_brasileiro:
+            urls_brasileiras.append(linha.strip())  # Mantém formatação original
 
     return urls_brasileiras
 
