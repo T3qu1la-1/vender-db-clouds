@@ -197,6 +197,14 @@ def get_user_session(ip):
             print(f"⚠️ Erro ao carregar stats: {e}")
             pass
     
+    # Atualiza última atividade
+    IP_SESSIONS[ip_hash]['last_activity'] = datetime.now()
+    
+    # Agenda limpeza automática (20 minutos de inatividade)
+    schedule_cleanup(ip_hash)
+    
+    return IP_SESSIONS[ip_hash]
+    
 
 def processar_streaming_direto(file, session, ip_hash):
     """Processamento streaming direto para arquivos 1GB+ sem usar RAM"""
@@ -315,13 +323,7 @@ def processar_streaming_direto(file, session, ip_hash):
         return 0
 
 
-    # Atualiza última atividade
-    IP_SESSIONS[ip_hash]['last_activity'] = datetime.now()
     
-    # Agenda limpeza automática (30 minutos de inatividade)
-    schedule_cleanup(ip_hash)
-    
-    return IP_SESSIONS[ip_hash]
 
 def schedule_cleanup(ip_hash):
     """Agenda limpeza automática dos SQLites temporários por IP"""
@@ -1128,8 +1130,12 @@ def filtrar_urls_brasileiras(linhas):
 @app.route("/", methods=["GET", "POST"])
 def upload_file():
     user_ip = get_user_ip()
-    session = get_user_session(user_ip)
     ip_hash = get_ip_hash(user_ip)
+    session = get_user_session(user_ip)
+    
+    # Garante que sempre temos uma sessão válida
+    if not session:
+        session = get_user_session(user_ip)
     
     if request.method == "POST":
         try:
@@ -1350,7 +1356,7 @@ def upload_file():
             return "Erro interno no servidor", 500
 
     # Renderiza página principal com estatísticas do IP real
-    stats = session['stats']
+    stats = session['stats'] if session else {'total_lines': 0, 'valid_lines': 0, 'brazilian_urls': 0, 'domains': 0}
     page_content = html_form.replace('USER_REAL_IP', user_ip)
     page_content = page_content.replace('USER_IP_HASH', ip_hash)
     page_content = page_content.replace('USER_TOTAL_LINES', f"{stats['total_lines']:,}")
