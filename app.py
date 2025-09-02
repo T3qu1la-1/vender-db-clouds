@@ -25,20 +25,53 @@ IP_SESSIONS = {}
 CLEANUP_TIMERS = {}
 
 def get_user_ip():
-    """Obtém IP do usuário de forma segura"""
-    forwarded_ip = request.headers.get('X-Forwarded-For')
-    if forwarded_ip:
-        return forwarded_ip.split(',')[0].strip()
-    return request.environ.get('REMOTE_ADDR', 'unknown')
+    """Obtém IP real do usuário de forma mais precisa"""
+    # Tenta vários headers para pegar o IP real
+    ip_headers = [
+        'HTTP_CF_CONNECTING_IP',      # Cloudflare
+        'HTTP_X_FORWARDED_FOR',       # Proxies padrão
+        'HTTP_X_REAL_IP',             # Nginx
+        'HTTP_X_FORWARDED',           # Outros proxies
+        'HTTP_X_CLUSTER_CLIENT_IP',   # Clusters
+        'HTTP_FORWARDED_FOR',         # RFC 7239
+        'HTTP_FORWARDED',             # RFC 7239
+        'REMOTE_ADDR'                 # IP direto
+    ]
+    
+    # Tenta request.headers primeiro
+    for header in ['CF-Connecting-IP', 'X-Forwarded-For', 'X-Real-IP', 'X-Forwarded', 'X-Cluster-Client-IP']:
+        ip = request.headers.get(header)
+        if ip:
+            # Se for lista de IPs separados por vírgula, pega o primeiro
+            real_ip = ip.split(',')[0].strip()
+            if real_ip and real_ip != 'unknown':
+                return real_ip
+    
+    # Tenta request.environ
+    for header in ip_headers:
+        ip = request.environ.get(header)
+        if ip:
+            real_ip = ip.split(',')[0].strip()
+            if real_ip and real_ip != 'unknown':
+                return real_ip
+    
+    # Fallback para REMOTE_ADDR
+    return request.environ.get('REMOTE_ADDR', f'temp_{int(time.time())}')
 
 def get_ip_hash(ip):
-    """Gera hash único para o IP"""
-    return hashlib.md5(ip.encode()).hexdigest()[:8]
+    """Gera hash único e seguro para o IP"""
+    # Adiciona timestamp para garantir unicidade em caso de IPs temporários
+    timestamp = str(int(time.time() // 3600))  # Muda a cada hora
+    unique_string = f"{ip}_{timestamp}"
+    return hashlib.sha256(unique_string.encode()).hexdigest()[:12]
 
-def create_ip_databases(ip_hash):
+def create_ip_databases(ip_hash, real_ip=None):
     """Cria bancos SQLite específicos para o IP"""
     db_dir = os.path.join(tempfile.gettempdir(), f"user_{ip_hash}")
     os.makedirs(db_dir, exist_ok=True)
+    
+    print(f"🗄️ Criando SQLites para IP real: {real_ip} -> Hash: {ip_hash}")
+    print(f"📁 Diretório SQLite: {db_dir}")
     
     databases = {
         'main': os.path.join(db_dir, 'main.db'),
@@ -112,11 +145,11 @@ def create_ip_databases(ip_hash):
     return databases
 
 def get_user_session(ip):
-    """Obtém ou cria sessão do usuário por IP"""
+    """Obtém ou cria sessão do usuário por IP real"""
     ip_hash = get_ip_hash(ip)
     
     if ip_hash not in IP_SESSIONS:
-        databases = create_ip_databases(ip_hash)
+        databases = create_ip_databases(ip_hash, ip)
         IP_SESSIONS[ip_hash] = {
             'databases': databases,
             'last_activity': datetime.now(),
@@ -149,7 +182,7 @@ def get_user_session(ip):
     return IP_SESSIONS[ip_hash]
 
 def schedule_cleanup(ip_hash):
-    """Agenda limpeza automática dos dados do IP"""
+    """Agenda limpeza automática dos SQLites temporários por IP"""
     # Cancela timer anterior se existir
     if ip_hash in CLEANUP_TIMERS:
         CLEANUP_TIMERS[ip_hash].cancel()
@@ -157,25 +190,26 @@ def schedule_cleanup(ip_hash):
     def cleanup_ip_data():
         try:
             if ip_hash in IP_SESSIONS:
-                # Remove todos os bancos SQLite do IP
+                # Remove todos os bancos SQLite temporários do IP
                 db_dir = os.path.dirname(IP_SESSIONS[ip_hash]['databases']['main'])
                 if os.path.exists(db_dir):
                     import shutil
                     shutil.rmtree(db_dir)
-                    print(f"✓ Limpeza automática: dados do IP {ip_hash} removidos")
+                    print(f"🗑️ Limpeza automática: SQLites temporários do IP {ip_hash} removidos")
                 
                 # Remove da memória
                 del IP_SESSIONS[ip_hash]
                 if ip_hash in CLEANUP_TIMERS:
                     del CLEANUP_TIMERS[ip_hash]
         except Exception as e:
-            print(f"✗ Erro na limpeza do IP {ip_hash}: {e}")
+            print(f"✗ Erro na limpeza automática do IP {ip_hash}: {e}")
     
-    # Timer de 30 minutos (1800 segundos)
-    timer = threading.Timer(1800.0, cleanup_ip_data)
+    # Timer de 20 minutos para SQLites temporários (1200 segundos)
+    timer = threading.Timer(1200.0, cleanup_ip_data)
     timer.daemon = True
     timer.start()
     CLEANUP_TIMERS[ip_hash] = timer
+    print(f"⏰ Timer de limpeza agendado para IP {ip_hash} em 20 minutos")
 
 def update_stats(ip_hash, new_lines_count):
     """Atualiza estatísticas no banco SQLite"""
@@ -475,11 +509,12 @@ html_form = """
             <div class="d-flex align-items-center justify-content-between">
                 <div>
                     <i class="fas fa-user-circle me-2"></i>
-                    <strong>Sua Sessão:</strong> <code>""" + """USER_IP_HASH</code>
+                    <strong>IP Real:</strong> <code class="text-warning">USER_REAL_IP</code>
+                    <br><small class="text-muted">Hash Sessão: <code>USER_IP_HASH</code></small>
                 </div>
                 <div>
                     <i class="fas fa-database me-2"></i>
-                    <span class="badge bg-success">4 SQLites Ativos</span>
+                    <span class="badge bg-success">4 SQLites Temporários</span>
                 </div>
             </div>
         </div>
@@ -488,8 +523,18 @@ html_form = """
             <div class="d-flex align-items-center">
                 <i class="fas fa-clock me-3 text-warning"></i>
                 <div>
-                    <strong>Auto-Limpeza:</strong> Seus dados serão automaticamente excluídos após 30 minutos de inatividade
-                    <br><small class="text-muted">Todos os SQLites, arquivos e estatísticas serão removidos quando você sair</small>
+                    <strong>SQLites Temporários:</strong> Auto-limpeza após 20 minutos de inatividade
+                    <br><small class="text-muted">Bancos SQLite específicos do seu IP real serão removidos automaticamente</small>
+                </div>
+            </div>
+        </div></small>
+        
+        <div class="alert alert-info border-0" style="background: rgba(23, 162, 184, 0.1); border-radius: 10px; border: 1px solid rgba(23, 162, 184, 0.3);">
+            <div class="d-flex align-items-center">
+                <i class="fas fa-server me-3"></i>
+                <div>
+                    <strong>Sistema Multi-SQLite por IP:</strong> Cada IP real recebe 4 bancos SQLite isolados
+                    <br><small class="text-muted">main.db • stats.db • brazilian.db • domains.db</small>
                 </div>
             </div>
         </div>
@@ -1037,14 +1082,16 @@ def upload_file():
             print(f"✗ Erro geral no processamento: {str(e)[:100]}")
             return "Erro interno no servidor", 500
 
-    # Renderiza página principal com estatísticas do IP
+    # Renderiza página principal com estatísticas do IP real
     stats = session['stats']
-    page_content = html_form.replace('USER_IP_HASH', ip_hash)
+    page_content = html_form.replace('USER_REAL_IP', user_ip)
+    page_content = page_content.replace('USER_IP_HASH', ip_hash)
     page_content = page_content.replace('USER_TOTAL_LINES', f"{stats['total_lines']:,}")
     page_content = page_content.replace('USER_VALID_LINES', f"{stats['valid_lines']:,}")
     page_content = page_content.replace('USER_BRAZILIAN_URLS', f"{stats['brazilian_urls']:,}")
     page_content = page_content.replace('USER_DOMAINS', f"{stats['domains']:,}")
     
+    print(f"🌐 Renderizando página para IP real: {user_ip} (Hash: {ip_hash})")
     return page_content
 
 @app.route("/download")
