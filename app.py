@@ -204,7 +204,7 @@ def get_user_session(ip):
     return IP_SESSIONS[ip_hash]
 
 def processar_streaming_direto(file, session, ip_hash):
-    """Processamento streaming ultra-otimizado para arquivos 500MB+ direto nos shards"""
+    """Processamento streaming ultra-otimizado para arquivos 500MB+ direto nos shards com lock timeout"""
     try:
         file.seek(0, 2)
         file_size = file.tell()
@@ -213,49 +213,67 @@ def processar_streaming_direto(file, session, ip_hash):
         
         print(f"🚀 STREAMING 500MB+: {file_size_mb:.1f}MB direto para 4 shards")
         
-        # Abre conexões com os 4 shards simultaneamente
+        # Abre conexões com os 4 shards com timeout de lock
         shard_connections = {}
+        max_retries = 3
+        
         for shard_num in range(4):
             db_path = os.path.join(os.path.dirname(session['databases']['main']), f"upload_shard_{shard_num}.db")
-            conn = sqlite3.connect(db_path)
             
-            # PRAGMA ultra-performance para 500MB+
-            conn.execute('PRAGMA journal_mode=OFF')
-            conn.execute('PRAGMA synchronous=OFF')
-            conn.execute('PRAGMA cache_size=200000')  # 200MB cache
-            conn.execute('PRAGMA temp_store=MEMORY')
-            conn.execute('PRAGMA mmap_size=2147483648')  # 2GB mmap
-            conn.execute('BEGIN TRANSACTION')
-            
-            # Cria tabela se não existir
-            cursor = conn.cursor()
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS credentials (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                url TEXT NOT NULL,
-                username TEXT NOT NULL,
-                password TEXT NOT NULL,
-                linha_completa TEXT NOT NULL,
-                file_source TEXT,
-                shard_id INTEGER,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-            ''')
-            conn.commit()
-            conn.execute('BEGIN TRANSACTION')
-            
-            shard_connections[shard_num] = conn
-            print(f"   📦 Shard {shard_num} preparado para streaming")
+            # Tenta conectar com retries para evitar locks
+            conn = None
+            for retry in range(max_retries):
+                try:
+                    conn = sqlite3.connect(db_path, timeout=30.0)  # 30s timeout
+                    
+                    # PRAGMA ultra-performance para 500MB+ com WAL mode
+                    conn.execute('PRAGMA journal_mode=WAL')  # WAL permite concurrent reads
+                    conn.execute('PRAGMA synchronous=NORMAL')  # Mais seguro que OFF
+                    conn.execute('PRAGMA cache_size=100000')  # 100MB cache por shard
+                    conn.execute('PRAGMA temp_store=MEMORY')
+                    conn.execute('PRAGMA mmap_size=1073741824')  # 1GB mmap
+                    conn.execute('PRAGMA busy_timeout=30000')  # 30s busy timeout
+                    conn.execute('PRAGMA wal_autocheckpoint=1000')
+                    
+                    # Cria tabela se não existir
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS credentials (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        url TEXT NOT NULL,
+                        username TEXT NOT NULL,
+                        password TEXT NOT NULL,
+                        linha_completa TEXT NOT NULL,
+                        file_source TEXT,
+                        shard_id INTEGER,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                    ''')
+                    conn.commit()
+                    
+                    shard_connections[shard_num] = conn
+                    print(f"   📦 Shard {shard_num} preparado para streaming (tentativa {retry + 1})")
+                    break
+                    
+                except sqlite3.OperationalError as e:
+                    if "database is locked" in str(e) and retry < max_retries - 1:
+                        print(f"   ⏳ Shard {shard_num} locked, aguardando {retry + 1}s...")
+                        time.sleep(retry + 1)
+                        if conn:
+                            conn.close()
+                        continue
+                    else:
+                        raise e
         
         # Streaming com distribuição nos shards + detecção BR
         total_valid = 0
         total_br_urls = 0
         linha_buffer = ""
-        chunk_size = 65536  # 64KB chunks para arquivos gigantes
+        chunk_size = 32768  # 32KB chunks para reduzir uso de RAM
         bytes_processed = 0
         shard_batches = {0: [], 1: [], 2: [], 3: []}
         br_batch = []
-        batch_size = 1000
+        batch_size = 500  # Batches menores para evitar locks longos
         
         # Conexão para URLs brasileiras
         conn_br = sqlite3.connect(os.path.join(os.path.dirname(session['databases']['main']), 'brazilian.db'))
@@ -329,14 +347,26 @@ def processar_streaming_direto(file, session, ip_hash):
                 
                 for shard_num, batch_data in shard_batches.items():
                     if batch_data:
-                        cursor = shard_connections[shard_num].cursor()
-                        cursor.executemany('''
-                        INSERT INTO credentials (url, username, password, linha_completa, file_source, shard_id)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        ''', batch_data)
-                        shard_connections[shard_num].commit()
-                        shard_connections[shard_num].execute('BEGIN TRANSACTION')
-                        total_valid += len(batch_data)
+                        # Retry logic para inserts com timeout
+                        max_insert_retries = 3
+                        for insert_retry in range(max_insert_retries):
+                            try:
+                                cursor = shard_connections[shard_num].cursor()
+                                cursor.executemany('''
+                                INSERT INTO credentials (url, username, password, linha_completa, file_source, shard_id)
+                                VALUES (?, ?, ?, ?, ?, ?)
+                                ''', batch_data)
+                                shard_connections[shard_num].commit()
+                                total_valid += len(batch_data)
+                                break
+                            except sqlite3.OperationalError as e:
+                                if "database is locked" in str(e) and insert_retry < max_insert_retries - 1:
+                                    print(f"   ⏳ Shard {shard_num} locked no insert, aguardando {insert_retry + 1}s...")
+                                    time.sleep(insert_retry + 1)
+                                    continue
+                                else:
+                                    print(f"   ❌ Shard {shard_num} falhou após {max_insert_retries} tentativas")
+                                    raise e
                 
                 # 🇧🇷 Processa lote de URLs brasileiras
                 if br_batch:
@@ -377,10 +407,28 @@ def processar_streaming_direto(file, session, ip_hash):
             ''', br_batch)
             conn_br.commit()
         
-        # Fecha conexões
-        for conn in shard_connections.values():
-            conn.close()
-        conn_br.close()
+        # Fecha conexões com retry para evitar locks
+        for shard_num, conn in shard_connections.items():
+            try:
+                conn.commit()  # Commit final
+                conn.close()
+                print(f"   ✅ Shard {shard_num} fechado com sucesso")
+            except Exception as e:
+                print(f"   ⚠️ Erro ao fechar Shard {shard_num}: {e}")
+                try:
+                    conn.close()
+                except:
+                    pass
+        
+        try:
+            conn_br.commit()
+            conn_br.close()
+        except Exception as e:
+            print(f"   ⚠️ Erro ao fechar brazilian.db: {e}")
+            try:
+                conn_br.close()
+            except:
+                pass
         
         print(f"✅ STREAMING 500MB+ COMPLETO: {total_valid:,} linhas nos 4 shards!")
         print(f"🇧🇷 URLs BRASILEIRAS DETECTADAS: {total_br_urls:,} salvas em brazilian.db")
@@ -1656,13 +1704,13 @@ def upload_file():
                         
                         # NÃO consolidar - manter distribuído nos 4 shards
                         
-                        # Libera content da memória
-                        del content
-                        
                         print(f"   ✅ Total processado: {total_valid:,} válidas")
                         total_filtradas += total_valid
-                        taxa = (total_valid / len(content) * 100) if len(content) > 0 else 0
                         arquivos_processados.append(f"{file.filename} ({total_valid:,} válidas)")
+                        
+                        # Libera content da memória apenas se não for streaming
+                        if isinstance(content, list):
+                            del content
                         
                     except MemoryError:
                         print(f"💾 ERRO RAM: {file.filename} - Tentando streaming direto...")
