@@ -76,8 +76,8 @@ session_data = {
     }
 }
 
-# Limite máximo de linhas acumuladas
-MAX_LINES = 5000000  # 5 milhões
+# Sem limite de linhas
+# MAX_LINES removido
 
 # HTML da interface com Bootstrap styling
 html_form = """
@@ -425,8 +425,8 @@ html_form = """
                                 </div>
                                 <br>
                                 <small class="text-muted mt-2 d-block">
-                                    <i class="fas fa-shield-alt me-1"></i> 
-                                    Limite máximo: 5.000.000 linhas
+                                    <i class="fas fa-infinity me-1"></i> 
+                                    Sem limite de linhas
                                 </small>
                             </div>
                             <div class="d-grid gap-2 d-md-flex justify-content-md-center">
@@ -640,10 +640,6 @@ def upload_file():
                             if linha_limpa:  # ignora linhas vazias
                                 linhas_processadas += 1
                                 if linha_valida(linha_limpa):
-                                    # Verifica se não ultrapassou o limite
-                                    if len(session_data['all_lines']) + len(filtradas) >= MAX_LINES:
-                                        app.logger.info(f"Limite de {MAX_LINES:,} linhas atingido!")
-                                        break
                                     filtradas.append(linha_limpa)
                                     
                                     # Força garbage collection a cada 50k linhas para economizar memória
@@ -682,11 +678,6 @@ def upload_file():
                         session_data['all_lines'].extend(filtradas)
                         total_filtradas += len(filtradas)
                         arquivos_processados.append(f"{file.filename} ({len(filtradas)} válidas)")
-                        
-                        # Para se atingiu o limite
-                        if len(session_data['all_lines']) >= MAX_LINES:
-                            app.logger.info(f"Limite máximo de {MAX_LINES:,} linhas atingido! Parando processamento.")
-                            break
                         
                     except Exception as e:
                         app.logger.error(f"Erro ao processar arquivo {file.filename}: {e}")
@@ -958,10 +949,8 @@ def download():
                 'Content-Type': 'text/plain; charset=utf-8'
             }
         )
-                    
-            app.logger.info(f"Arquivo salvo com sucesso: {filename}")
-            
-        except MemoryError:
+        
+    except MemoryError:
             app.logger.error("Erro de memória ao salvar arquivo")
             return "Arquivo muito grande para processar. Tente dividir em arquivos menores.", 413
         except Exception as write_error:
@@ -1690,6 +1679,6 @@ def db_preview():
     </html>
     """)
 
-# Configuração do tamanho máximo de upload - 500MB
-app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
+# Sem limite de tamanho de upload
+# app.config['MAX_CONTENT_LENGTH'] removido
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
