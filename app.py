@@ -1696,8 +1696,5 @@ def db_preview():
     </html>
     """)
 
-if __name__ == "__main__":
-    # Configura o tamanho máximo de upload
-    app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
-    # Roda no navegador local
-    app.run(host="0.0.0.0", port=5000, debug=True)
+# Configuração do tamanho máximo de upload
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
