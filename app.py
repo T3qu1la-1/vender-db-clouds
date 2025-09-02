@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template_string, send_file, jsonify
+from flask import Flask, request, render_template_string, send_file, jsonify, Response
 import os
 import logging
 import sqlite3
@@ -6,6 +6,7 @@ import tempfile
 import zipfile
 import io
 import re
+import time # Import time for cleanup_old_temp_files
 from collections import Counter
 
 # Configure logging reduzido
@@ -13,55 +14,6 @@ logging.basicConfig(level=logging.WARNING)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret-key-change-in-production")
-
-# Função para limpeza de arquivos temporários antigos
-def cleanup_old_temp_files():
-    """Remove arquivos temporários antigos (mais de 1 hora) - versão otimizada"""
-    import time
-    import glob
-    temp_dir = tempfile.gettempdir()
-    current_time = time.time()
-
-    try:
-        # Usa glob para buscar apenas arquivos específicos (mais rápido que listar tudo)
-        patterns = [
-            os.path.join(temp_dir, "*resultado_final*.txt"),
-            os.path.join(temp_dir, "*database*.db"),
-            os.path.join(temp_dir, "*_otimizado.txt")
-        ]
-
-        files_removed = 0
-        for pattern in patterns:
-            for filepath in glob.glob(pattern):
-                try:
-                    if os.path.isfile(filepath):
-                        file_age = current_time - os.path.getmtime(filepath)
-                        if file_age > 3600:  # 1 hora
-                            os.remove(filepath)
-                            files_removed += 1
-                            # Limita a 10 arquivos por inicialização para evitar timeout
-                            if files_removed >= 10:
-                                app.logger.info(f"Limpeza limitada: {files_removed} arquivos removidos")
-                                return
-                except Exception as e:
-                    app.logger.error(f"Erro ao remover arquivo {filepath}: {e}")
-
-        if files_removed > 0:
-            app.logger.info(f"Limpeza concluída: {files_removed} arquivos temporários removidos")
-
-    except Exception as e:
-        app.logger.error(f"Erro na limpeza de arquivos temporários: {e}")
-
-# Executa limpeza ao iniciar a aplicação (em thread separada para não bloquear)
-def init_cleanup():
-    import threading
-    cleanup_thread = threading.Thread(target=cleanup_old_temp_files, daemon=True)
-    cleanup_thread.start()
-
-# init_cleanup() # Comentado para remover limpeza automática
-
-# Pasta de uploads não é mais criada - tudo é processado em memória
-# UPLOAD_FOLDER removido - arquivos são temporários
 
 # Sistema de processamento em memória - sem arquivos salvos
 session_data = {
@@ -75,9 +27,6 @@ session_data = {
         'domains': {}
     }
 }
-
-# Sem limite de linhas
-# MAX_LINES removido
 
 # HTML da interface com Bootstrap styling
 html_form = """
@@ -888,6 +837,7 @@ def upload_file():
 
 @app.route("/download")
 def download():
+    """Download direto do conteúdo processado em memória."""
     try:
         if not session_data['all_lines']:
             # Erro se não há linhas para download
@@ -1213,7 +1163,7 @@ def download_db(filename):
         db_path = os.path.join(tempfile.gettempdir(), f"{filename}.db")
         if os.path.exists(db_path):
             # Programa limpeza do arquivo após download
-            def cleanup_db():
+            def cleanup_file(): # Renamed from cleanup_db to cleanup_file
                 try:
                     if os.path.exists(db_path):
                         os.remove(db_path)
@@ -1223,7 +1173,7 @@ def download_db(filename):
 
             # Agenda limpeza para após o download
             import threading
-            timer = threading.Timer(60.0, cleanup_db)  # Remove após 60 segundos para DBs
+            timer = threading.Timer(30.0, cleanup_file)  # Remove após 30 segundos
             timer.start()
 
             return send_file(db_path, as_attachment=True, download_name=f"{filename}.db")
@@ -1341,6 +1291,19 @@ def download_filtered(filename):
     try:
         file_path = os.path.join(tempfile.gettempdir(), f"{filename}.txt")
         if os.path.exists(file_path):
+            # Agenda limpeza do arquivo após o download
+            def cleanup_file():
+                try:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                        app.logger.info(f"Arquivo filtrado temporário removido: {filename}.txt")
+                except Exception as cleanup_error:
+                    app.logger.error(f"Erro ao limpar arquivo filtrado: {cleanup_error}")
+
+            import threading
+            timer = threading.Timer(30.0, cleanup_file)  # Remove após 30 segundos
+            timer.start()
+            
             return send_file(file_path, as_attachment=True, download_name=f"{filename}.txt")
         else:
             return "Arquivo não encontrado", 404
@@ -1494,11 +1457,19 @@ def db_preview():
 
             conn.close()
 
-            # Remove arquivo temporário
-            try:
-                os.remove(temp_db_path)
-            except:
-                pass
+            # Agenda limpeza do arquivo temporário após um tempo
+            def cleanup_file():
+                try:
+                    if os.path.exists(temp_db_path):
+                        os.remove(temp_db_path)
+                        app.logger.info(f"Arquivo DB temporário (preview) removido: {os.path.basename(temp_db_path)}")
+                except Exception as cleanup_error:
+                    app.logger.error(f"Erro ao limpar arquivo DB temporário (preview): {cleanup_error}")
+            
+            import threading
+            timer = threading.Timer(60.0, cleanup_file) # Limpa após 60 segundos
+            timer.daemon = True
+            timer.start()
 
             return preview_html
 
