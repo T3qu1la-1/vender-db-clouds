@@ -585,7 +585,7 @@ def filtrar_urls_brasileiras(linhas):
     return urls_brasileiras
 
 def linha_valida(linha: str) -> bool:
-    """Verifica se a linha segue EXATAMENTE o padrão url:user:pass - apenas HTTP/HTTPS"""
+    """Verifica se a linha segue EXATAMENTE o padrão url:user:pass - apenas HTTP/HTTPS simples"""
     if not linha or not linha.strip():
         return False
 
@@ -598,20 +598,34 @@ def linha_valida(linha: str) -> bool:
     # Remove espaços extras
     linha = linha.strip()
 
+    # REJEITA qualquer linha que contenha @ (formatos complexos com emails)
+    if '@' in linha:
+        return False
+
+    # REJEITA linhas muito longas (provavelmente tokens ou esquemas complexos)
+    if len(linha) > 200:
+        return False
+
     # Rejeita esquemas não-web (android://, ftp://, file://, etc.)
     esquemas_rejeitados = [
         'android://', 'ftp://', 'file://', 'ssh://', 'telnet://', 
         'ldap://', 'ldaps://', 'smtp://', 'pop3://', 'imap://',
         'bluetooth://', 'nfc://', 'sms://', 'tel://', 'mailto:',
-        'market://', 'intent://', 'package:'
+        'market://', 'intent://', 'package:', 'content://',
+        'chrome://', 'firefox://', 'opera://', 'edge://',
+        'steam://', 'discord://', 'spotify://', 'whatsapp://'
     ]
     
     for esquema in esquemas_rejeitados:
         if linha.lower().startswith(esquema):
             return False
 
-    # Deve conter exatamente 2 dois pontos (:) para formato simples url:user:pass
-    # OU começar com http:// ou https:// (que terão mais dois pontos)
+    # REJEITA linhas com caracteres especiais suspeitos (tokens, hashes)
+    caracteres_suspeitos = ['==', '++', '--', '@@', '##', '$$', '%%', '&&', '||']
+    if any(char in linha for char in caracteres_suspeitos):
+        return False
+
+    # Deve conter pelo menos um dois pontos (:)
     if not ':' in linha:
         return False
 
@@ -619,34 +633,46 @@ def linha_valida(linha: str) -> bool:
 
     # Para URLs HTTPS (https://site.com:user:pass = 4 partes)
     if linha.startswith('https://'):
-        if len(partes) >= 4:
+        if len(partes) == 4:  # EXATAMENTE 4 partes
             url = ':'.join(partes[:-2])  # https://site.com
             user = partes[-2].strip()
             password = partes[-1].strip()
             
-            # Valida se URL é web válida
-            if url.startswith('https://') and len(url) > 8:
-                return bool(user and password and len(user) > 0 and len(password) > 0)
+            # Valida se URL é web válida E simples
+            if (url.startswith('https://') and len(url) > 8 and 
+                '.' in url and not '@' in url):
+                return bool(user and password and len(user) > 0 and len(password) > 0 and
+                           user.isalnum() and len(user) <= 50 and len(password) <= 50)
     
-    # Para URLs HTTP (http://site.com:user:pass = 3 partes)
+    # Para URLs HTTP (http://site.com:user:pass = 3 partes após http)
     elif linha.startswith('http://'):
-        if len(partes) >= 3:
+        if len(partes) == 3:  # EXATAMENTE 3 partes após http://
             url = ':'.join(partes[:-2])  # http://site.com
             user = partes[-2].strip()
             password = partes[-1].strip()
             
-            # Valida se URL é web válida
-            if url.startswith('http://') and len(url) > 7:
-                return bool(user and password and len(user) > 0 and len(password) > 0)
+            # Valida se URL é web válida E simples
+            if (url.startswith('http://') and len(url) > 7 and 
+                '.' in url and not '@' in url):
+                return bool(user and password and len(user) > 0 and len(password) > 0 and
+                           len(user) <= 50 and len(password) <= 50)
     
-    # Para formato simples sem protocolo (site.com:user:pass = 3 partes)
+    # Para formato simples sem protocolo (site.com:user:pass = EXATAMENTE 3 partes)
     elif len(partes) == 3:
         url, user, password = partes[0].strip(), partes[1].strip(), partes[2].strip()
         
-        # Valida se todas as partes têm conteúdo
-        if url and user and password and len(url) > 0 and len(user) > 0 and len(password) > 0:
-            # Verifica se URL parece ser um domínio válido (contém ponto ou é IP)
-            if ('.' in url or url.replace('.', '').isdigit()) and not url.startswith('/'):
+        # Valida se todas as partes têm conteúdo E são simples
+        if (url and user and password and 
+            len(url) > 0 and len(user) > 0 and len(password) > 0 and
+            len(user) <= 50 and len(password) <= 50):
+            
+            # URL deve ter pelo menos um ponto (domínio) E não começar com /
+            # E não conter caracteres especiais de esquemas complexos
+            if ('.' in url and not url.startswith('/') and 
+                not '@' in url and not '//' in url and
+                not url.startswith('com.') and  # rejeita package names
+                not url.endswith('.apk') and   # rejeita APKs
+                not any(c in url for c in ['<', '>', '"', "'", '\\', '{', '}'])):
                 return True
 
     return False
