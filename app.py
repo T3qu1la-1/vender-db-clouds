@@ -598,16 +598,50 @@ def linha_valida(linha: str) -> bool:
     # Remove espaços extras
     linha = linha.strip()
 
-    # Rejeita esquemas não-web (android://, ftp://, file://, etc.)
+    # ❌ REJEITA URLs muito longas (>200 caracteres)
+    if len(linha) > 200:
+        return False
+
+    # ❌ REJEITA linhas com == ou outros caracteres de token/hash
+    caracteres_suspeitos = ['==', '===', '!=', '++', '--', '<<', '>>', '&&', '||', 
+                           '#{', '}#', '${', '}$', '[[', ']]', '((', '))', 
+                           'Bearer ', 'Token ', 'JWT ', 'OAuth', 'API_KEY',
+                           'SECRET_', '_TOKEN', '_KEY', '_HASH']
+    
+    for suspeito in caracteres_suspeitos:
+        if suspeito in linha:
+            return False
+
+    # ❌ REJEITA package names (com.algo.app)
+    if re.match(r'^[a-z]+\.[a-z]+\.[a-z]+', linha.lower()):
+        return False
+
+    # ❌ REJEITA esquemas não-web (android://, content://, etc.)
     esquemas_rejeitados = [
-        'android://', 'ftp://', 'file://', 'ssh://', 'telnet://', 
+        'android://', 'content://', 'ftp://', 'file://', 'ssh://', 'telnet://', 
         'ldap://', 'ldaps://', 'smtp://', 'pop3://', 'imap://',
         'bluetooth://', 'nfc://', 'sms://', 'tel://', 'mailto:',
-        'market://', 'intent://', 'package:'
+        'market://', 'intent://', 'package:', 'app://', 'chrome://',
+        'moz-extension://', 'chrome-extension://', 'edge://', 'safari://',
+        'data:', 'blob:', 'filesystem:', 'ws://', 'wss://',
+        'rtmp://', 'rtsp://', 'magnet:', 'torrent:', 'bitcoin:',
+        'ethereum:', 'ipfs://', 'jar:', 'resource:'
     ]
 
     for esquema in esquemas_rejeitados:
         if linha.lower().startswith(esquema):
+            return False
+
+    # ❌ REJEITA linhas que parecem ser tokens/chaves/hashes
+    # Detecta sequências muito longas de caracteres alfanuméricos (típico de tokens)
+    palavras = linha.split(':')
+    for palavra in palavras:
+        palavra_limpa = palavra.strip()
+        # Se tem mais de 32 caracteres consecutivos sem espaços/pontos, pode ser token
+        if len(palavra_limpa) > 32 and palavra_limpa.isalnum():
+            return False
+        # Se contém base64 típico (termina com = ou ==)
+        if palavra_limpa.endswith('=') and len(palavra_limpa) > 20:
             return False
 
     # Deve conter exatamente 2 dois pontos (:) para formato simples url:user:pass
