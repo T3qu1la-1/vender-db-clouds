@@ -1,10 +1,12 @@
-from flask import Flask, request, render_template_string, send_file
+from flask import Flask, request, render_template_string, send_file, jsonify
 import os
 import logging
 import sqlite3
 import tempfile
 import zipfile
 import io
+import re
+from collections import Counter
 
 # Configure logging reduzido
 logging.basicConfig(level=logging.WARNING)
@@ -436,6 +438,10 @@ html_form = """
                                 <a href="/db-preview" class="btn btn-primary btn-lg">
                                     <i class="fas fa-search me-2"></i>
                                     🔍 Visualizar DB
+                                </a>
+                                <a href="/preview-files" class="btn btn-warning btn-lg">
+                                    <i class="fas fa-eye me-2"></i>
+                                    👀 Preview Arquivos
                                 </a>
                             </div>
                         </div>
@@ -1696,5 +1702,5 @@ def db_preview():
     </html>
     """)
 
-# Configuração do tamanho máximo de upload
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+# Configuração do tamanho máximo de upload - 100MB
+app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
