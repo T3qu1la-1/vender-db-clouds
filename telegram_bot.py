@@ -14,6 +14,7 @@ import zipfile
 import rarfile
 import asyncio
 import tempfile
+import sqlite3
 from urllib.parse import urlparse
 from datetime import datetime
 from telethon import TelegramClient, events, Button
@@ -63,6 +64,134 @@ painel_ativo = False
 # Controle de uploads em lote
 upload_tasks = {}  # {chat_id: {'active': bool, 'files': [], 'results': []}}
 processing_queue = {}  # {chat_id: asyncio.Queue}
+
+# SQLite para histórico de usuários e contadores
+USER_HISTORY_DB = "user_history.db"
+
+def init_user_history_db():
+    """Inicializa SQLite para histórico de usuários e contadores"""
+    try:
+        conn = sqlite3.connect(USER_HISTORY_DB)
+        cursor = conn.cursor()
+        
+        # Tabela para histórico de usuários com contadores
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_history (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            finalization_count INTEGER DEFAULT 0,
+            last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            total_files_processed INTEGER DEFAULT 0,
+            total_credentials INTEGER DEFAULT 0
+        )
+        ''')
+        
+        # Tabela para histórico de finalizações
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS finalization_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT,
+            finalization_number INTEGER,
+            files_count INTEGER,
+            credentials_count INTEGER,
+            brazilian_count INTEGER,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES user_history (user_id)
+        )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        logger.info("✅ SQLite de histórico de usuários inicializado")
+        
+    except Exception as e:
+        logger.error(f"❌ Erro ao inicializar SQLite de histórico: {e}")
+
+def get_user_counter(user_id):
+    """Obtém o contador de finalizações do usuário"""
+    try:
+        conn = sqlite3.connect(USER_HISTORY_DB)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT finalization_count FROM user_history WHERE user_id = ?', (user_id,))
+        result = cursor.fetchone()
+        
+        conn.close()
+        
+        if result:
+            return result[0]
+        else:
+            return 0
+            
+    except Exception as e:
+        logger.error(f"Erro ao obter contador do usuário {user_id}: {e}")
+        return 0
+
+def update_user_history(user_id, username, first_name, last_name, files_count, credentials_count, brazilian_count):
+    """Atualiza histórico do usuário e incrementa contador"""
+    try:
+        conn = sqlite3.connect(USER_HISTORY_DB)
+        cursor = conn.cursor()
+        
+        # Verifica se usuário existe
+        cursor.execute('SELECT finalization_count, total_files_processed, total_credentials FROM user_history WHERE user_id = ?', (user_id,))
+        result = cursor.fetchone()
+        
+        if result:
+            # Usuário existe - atualiza
+            new_count = result[0] + 1
+            new_total_files = result[1] + files_count
+            new_total_creds = result[2] + credentials_count
+            
+            cursor.execute('''
+            UPDATE user_history 
+            SET username = ?, first_name = ?, last_name = ?, 
+                finalization_count = ?, last_activity = CURRENT_TIMESTAMP,
+                total_files_processed = ?, total_credentials = ?
+            WHERE user_id = ?
+            ''', (username, first_name, last_name, new_count, new_total_files, new_total_creds, user_id))
+        else:
+            # Usuário novo - cria
+            new_count = 1
+            cursor.execute('''
+            INSERT INTO user_history 
+            (user_id, username, first_name, last_name, finalization_count, total_files_processed, total_credentials)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (user_id, username, first_name, last_name, new_count, files_count, credentials_count))
+        
+        # Adiciona ao histórico de finalizações
+        cursor.execute('''
+        INSERT INTO finalization_history 
+        (user_id, username, finalization_number, files_count, credentials_count, brazilian_count)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ''', (user_id, username, new_count, files_count, credentials_count, brazilian_count))
+        
+        conn.commit()
+        conn.close()
+        
+        logger.info(f"✅ Histórico atualizado: @{username} - #{new_count}")
+        return new_count
+        
+    except Exception as e:
+        logger.error(f"Erro ao atualizar histórico do usuário {user_id}: {e}")
+        return 1
+
+def generate_filename(user_id, username, finalization_number, file_type):
+    """Gera nome bonito do arquivo: cloudbr#X-@usuario"""
+    # Remove @ do username se já existir
+    clean_username = username.lstrip('@') if username else f"user{user_id}"
+    
+    # Formato: cloudbr#X-@usuario_tipo_timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"cloudbr#{finalization_number}-@{clean_username}_{file_type}_{timestamp}.txt"
+    
+    return filename
+
+# Inicializa SQLite no startup
+init_user_history_db()
 
 # ========== FUNÇÕES DE FILTRAGEM (do painel original) ==========
 
@@ -367,9 +496,9 @@ async def processar_arquivo_rar(content, filename, chat_id):
 
 # ========== FUNÇÕES DE ENVIO DE RESULTADOS ==========
 
-async def enviar_resultado_como_arquivo(chat_id, credenciais, tipo, stats):
+async def enviar_resultado_como_arquivo(chat_id, credenciais, tipo, stats, user_info):
     """
-    Envia resultado como arquivo na nuvem do Telegram
+    Envia resultado como arquivo na nuvem do Telegram com naming bonito
     """
     if not credenciais:
         await bot.send_message(chat_id, f"❌ Nenhuma credencial {tipo} encontrada.")
@@ -379,9 +508,13 @@ async def enviar_resultado_como_arquivo(chat_id, credenciais, tipo, stats):
         # Cria conteúdo do arquivo
         content = '\n'.join(credenciais)
 
-        # Nome do arquivo com timestamp
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"credenciais_{tipo}_{timestamp}.txt"
+        # Obtém informações do usuário para naming
+        user_id = user_info['user_id']
+        username = user_info['username']
+        finalization_number = user_info['finalization_number']
+
+        # Gera nome bonito do arquivo
+        filename = generate_filename(user_id, username, finalization_number, tipo.lower())
 
         logger.info(f"Enviando arquivo: {filename} com {len(credenciais)} credenciais")
 
@@ -392,7 +525,8 @@ async def enviar_resultado_como_arquivo(chat_id, credenciais, tipo, stats):
             attributes=[DocumentAttributeFilename(filename)],
             caption=f"📁 **{filename}**\n\n"
                    f"✅ {len(credenciais):,} credenciais {tipo}\n"
-                   f"📊 Taxa: {(stats['valid_lines']/max(1,stats['total_lines'])*100):.1f}%"
+                   f"📊 Taxa: {(stats['valid_lines']/max(1,stats['total_lines'])*100):.1f}%\n"
+                   f"👤 @{username} - Finalização #{finalization_number}"
         )
 
         logger.info(f"Arquivo enviado com sucesso: {filename}")
@@ -585,7 +719,7 @@ async def processar_fila_uploads(chat_id):
 
         # Finaliza processamento se tem arquivos
         if chat_id in upload_tasks and upload_tasks[chat_id]['processed_count'] > 0:
-            await finalizar_processamento_lote(chat_id)
+            await finalizar_processamento_lote(chat_id, user_triggered=False)
 
     except Exception as e:
         logger.error(f"Erro crítico no processador {chat_id}: {e}")
@@ -704,8 +838,8 @@ async def processar_arquivo_individual(chat_id, file_info):
             f"⚡ Continuando com próximos arquivos..."
         )
 
-async def finalizar_processamento_lote(chat_id):
-    """Finaliza processamento e envia resultados consolidados"""
+async def finalizar_processamento_lote(chat_id, user_triggered=False):
+    """Finaliza processamento e envia resultados consolidados com naming bonito"""
     try:
         if chat_id not in upload_tasks:
             return
@@ -716,37 +850,65 @@ async def finalizar_processamento_lote(chat_id):
         stats_finais = task_data['stats']
         files_processed = task_data['processed_count']
 
-        # Mensagem de finalização mais compacta
+        # Obtém informações do usuário
+        try:
+            user = await bot.get_entity(chat_id)
+            user_id = user.id
+            username = user.username or f"user{user_id}"
+            first_name = getattr(user, 'first_name', '') or ''
+            last_name = getattr(user, 'last_name', '') or ''
+        except:
+            user_id = chat_id
+            username = f"user{chat_id}"
+            first_name = ""
+            last_name = ""
+
+        # Atualiza histórico e obtém número da finalização
+        finalization_number = update_user_history(
+            user_id, username, first_name, last_name,
+            files_processed, len(total_credenciais), len(total_brasileiras)
+        )
+
+        # Informações do usuário para naming
+        user_info = {
+            'user_id': user_id,
+            'username': username,
+            'finalization_number': finalization_number
+        }
+
+        # Mensagem de finalização
         await bot.send_message(
             chat_id,
-            f"🎯 **LOTE FINALIZADO - ULTRA RÁPIDO!**\n\n"
+            f"🎯 **LOTE FINALIZADO - cloudbr#{finalization_number}**\n\n"
+            f"👤 **@{username}** - Finalização #{finalization_number}\n"
             f"📊 **Resumo:**\n"
             f"📁 Arquivos: **{files_processed}** | 📝 Linhas: **{stats_finais['total_lines']:,}**\n"
             f"✅ Válidas: **{len(total_credenciais):,}** | 🇧🇷 Brasileiras: **{len(total_brasileiras):,}**\n"
             f"🗑️ Spam: **{stats_finais['spam_removed']:,}** | 📈 Taxa: **{(len(total_credenciais)/max(1,stats_finais['total_lines'])*100):.1f}%**\n\n"
-            f"📤 **Enviando resultados consolidados...**"
+            f"📤 **Enviando resultados com naming bonito...**"
         )
 
-        # Envia arquivo consolidado geral
+        # Envia arquivo consolidado geral (apenas 1 arquivo - sem duplicação)
         if total_credenciais:
             await enviar_resultado_como_arquivo(
-                chat_id, total_credenciais, "LOTE_GERAL", stats_finais
+                chat_id, total_credenciais, "GERAL", stats_finais, user_info
             )
 
-        # Envia arquivo consolidado brasileiro
+        # Envia arquivo consolidado brasileiro (apenas 1 arquivo - sem duplicação)
         if total_brasileiras:
             await enviar_resultado_como_arquivo(
-                chat_id, total_brasileiras, "LOTE_BRASILEIRAS", stats_finais
+                chat_id, total_brasileiras, "BRASILEIRAS", stats_finais, user_info
             )
 
         # Mensagem de conclusão
         await bot.send_message(
             chat_id,
             f"🎉 **PROCESSAMENTO COMPLETO!**\n\n"
+            f"👤 **@{username}** - cloudbr#{finalization_number}\n"
             f"✅ **{files_processed} arquivos processados**\n"
-            f"📤 **Resultados consolidados enviados**\n"
-            f"🏁 **Sistema pronto para novos uploads**\n\n"
-            f"🔄 `/adicionar` | ❌ `/cancelarupload`"
+            f"📤 **Resultados enviados com naming bonito**\n"
+            f"💾 **Histórico salvo no SQLite**\n\n"
+            f"🔄 `/adicionar` | 📊 `/meuhistorico`"
         )
 
         # Limpa dados da sessão
@@ -755,7 +917,7 @@ async def finalizar_processamento_lote(chat_id):
         if chat_id in processing_queue:
             del processing_queue[chat_id]
 
-        logger.info(f"Processamento em lote finalizado para chat {chat_id}: {len(total_credenciais)} credenciais")
+        logger.info(f"Processamento finalizado: @{username} - cloudbr#{finalization_number} - {len(total_credenciais)} credenciais")
 
     except Exception as e:
         logger.error(f"Erro na finalização do lote {chat_id}: {e}")
@@ -889,6 +1051,7 @@ async def help_handler(event):
 /start - Iniciar o bot
 /adicionar - Ativar modo upload ultra rápido
 /cancelarupload - Cancelar uploads
+/meuhistorico - Ver seu histórico de finalizações
 /teste - Testar funcionamento
 /help - Esta ajuda
 /stats - Estatísticas
@@ -1023,7 +1186,7 @@ async def callback_handler(event):
                 )
 
                 # Força finalização
-                await finalizar_processamento_lote(chat_id)
+                await finalizar_processamento_lote(chat_id, user_triggered=True)
             else:
                 await event.answer("❌ Nenhum upload ativo", alert=True)
 
@@ -1041,6 +1204,63 @@ async def callback_handler(event):
     except Exception as e:
         logger.error(f"Erro no callback: {e}")
         await event.answer("❌ Erro interno", alert=True)
+
+@bot.on(events.NewMessage(pattern=r'^/meuhistorico$'))
+async def meu_historico_handler(event):
+    """Handler do comando /meuhistorico"""
+    try:
+        user_id = event.sender_id
+        
+        conn = sqlite3.connect(USER_HISTORY_DB)
+        cursor = conn.cursor()
+        
+        # Dados do usuário
+        cursor.execute('''
+        SELECT username, finalization_count, total_files_processed, total_credentials, last_activity 
+        FROM user_history WHERE user_id = ?
+        ''', (user_id,))
+        user_data = cursor.fetchone()
+        
+        if not user_data:
+            await event.reply("📊 **Você ainda não tem histórico!**\n\nUse `/adicionar` para começar.")
+            conn.close()
+            return
+        
+        username, fin_count, total_files, total_creds, last_activity = user_data
+        
+        # Últimas 5 finalizações
+        cursor.execute('''
+        SELECT finalization_number, files_count, credentials_count, brazilian_count, timestamp
+        FROM finalization_history 
+        WHERE user_id = ? 
+        ORDER BY timestamp DESC 
+        LIMIT 5
+        ''', (user_id,))
+        recent_finalizations = cursor.fetchall()
+        
+        conn.close()
+        
+        # Monta mensagem
+        history_text = f"📊 **Seu Histórico - @{username}**\n\n"
+        history_text += f"🎯 **Resumo Geral:**\n"
+        history_text += f"✅ Finalizações: **{fin_count}**\n"
+        history_text += f"📁 Total de arquivos: **{total_files:,}**\n"
+        history_text += f"🔑 Total de credenciais: **{total_creds:,}**\n"
+        history_text += f"⏰ Última atividade: **{last_activity[:16]}**\n\n"
+        
+        if recent_finalizations:
+            history_text += f"📈 **Últimas Finalizações:**\n"
+            for fin_num, files, creds, br_creds, timestamp in recent_finalizations:
+                history_text += f"🔹 **cloudbr#{fin_num}** | {files} arquivos | {creds:,} creds | 🇧🇷 {br_creds:,}\n"
+                history_text += f"    📅 {timestamp[:16]}\n"
+        
+        history_text += f"\n🔄 `/adicionar` para nova finalização!"
+        
+        await event.reply(history_text)
+        
+    except Exception as e:
+        logger.error(f"Erro no histórico: {e}")
+        await event.reply("❌ Erro ao buscar histórico")
 
 @bot.on(events.NewMessage(pattern=r'^/logs$'))
 async def logs_handler(event):
