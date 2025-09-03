@@ -180,13 +180,19 @@ def update_user_history(user_id, username, first_name, last_name, files_count, c
         return 1
 
 def generate_filename(user_id, username, finalization_number, file_type):
-    """Gera nome bonito do arquivo: cloudbr#X-@usuario"""
-    # Remove @ do username se já existir
-    clean_username = username.lstrip('@') if username else f"user{user_id}"
+    """Gera nome curto do arquivo: cloudbr#X-@usuario"""
+    # Remove @ do username se já existir e limita tamanho
+    clean_username = username.lstrip('@') if username else f"u{user_id}"
     
-    # Formato: cloudbr#X-@usuario_tipo_timestamp
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f"cloudbr#{finalization_number}-@{clean_username}_{file_type}_{timestamp}.txt"
+    # Limita username a 15 caracteres para nomes menores
+    if len(clean_username) > 15:
+        clean_username = clean_username[:15]
+    
+    # Formato curto: cloudbr#X-@usuario
+    if file_type.lower() == "brasileiras":
+        filename = f"cloudbr#{finalization_number}-@{clean_username}-BR.txt"
+    else:
+        filename = f"cloudbr#{finalization_number}-@{clean_username}.txt"
     
     return filename
 
