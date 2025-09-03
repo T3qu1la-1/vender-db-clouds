@@ -427,6 +427,64 @@ async def adicionar_handler(event):
     )
 
 @bot.on(events.NewMessage)
+async def progress_callback(current, total, progress_msg, filename, start_time):
+    """Callback para mostrar progresso do download"""
+    try:
+        # Calcula estatísticas
+        percent = (current / total) * 100
+        elapsed = time.time() - start_time
+        
+        if elapsed > 0 and current > 0:
+            speed = current / elapsed  # bytes por segundo
+            speed_mb = speed / (1024 * 1024)  # MB/s
+            
+            # Estima tempo restante
+            remaining_bytes = total - current
+            if speed > 0:
+                eta_seconds = remaining_bytes / speed
+                eta_minutes = eta_seconds / 60
+                
+                if eta_minutes < 1:
+                    eta_str = f"{eta_seconds:.0f}s"
+                elif eta_minutes < 60:
+                    eta_str = f"{eta_minutes:.1f}min"
+                else:
+                    eta_hours = eta_minutes / 60
+                    eta_str = f"{eta_hours:.1f}h"
+            else:
+                eta_str = "calculando..."
+        else:
+            speed_mb = 0
+            eta_str = "calculando..."
+        
+        # Barra de progresso visual
+        filled = int(percent / 5)  # 20 blocos = 100%
+        bar = "█" * filled + "░" * (20 - filled)
+        
+        # Atualiza mensagem a cada 5% ou a cada 3 segundos
+        if percent % 5 < 1 or elapsed % 3 < 1:
+            progress_text = f"""
+📥 **Download em Progresso**
+
+📁 **Arquivo:** `{filename}`
+📊 **Progresso:** {percent:.1f}%
+{bar}
+
+📈 **Estatísticas:**
+• ⬇️ **Baixado:** {current / (1024*1024):.1f} MB / {total / (1024*1024):.1f} MB
+• 🚀 **Velocidade:** {speed_mb:.1f} MB/s
+• ⏱️ **Tempo restante:** {eta_str}
+• ⏰ **Decorrido:** {elapsed:.0f}s
+
+⚡ **Aguarde...** Após o download, iniciará o processamento!
+            """
+            
+            await progress_msg.edit(progress_text)
+    
+    except Exception as e:
+        # Se der erro no progresso, não interrompe o download
+        logger.error(f"Erro no callback de progresso: {e}")
+
 async def document_handler(event):
     """Handler para documentos enviados"""
     # Só processa se tem documento
@@ -458,63 +516,131 @@ async def document_handler(event):
         )
         return
     
-    # Mensagem de processamento
-    processing_msg = await event.reply(
-        f"🚀 **Processando:** `{filename}`\n"
+    # Mensagem inicial de progresso
+    progress_msg = await event.reply(
+        f"📥 **Preparando Download**\n\n"
+        f"📁 **Arquivo:** `{filename}`\n"
         f"📏 **Tamanho:** {file_size / 1024 / 1024:.1f} MB\n"
-        f"⏳ **Aguarde...** Filtrando spam e detectando URLs brasileiras..."
+        f"⚡ **Iniciando...** Sistema de progresso ativado!"
     )
     
     try:
-        # Download do arquivo da nuvem do Telegram
-        logger.info(f"Iniciando download: {filename}")
-        file_content = await event.download_media(bytes)
+        # Download do arquivo com callback de progresso
+        logger.info(f"Iniciando download com progresso: {filename}")
+        start_time = time.time()
+        
+        # Função de progresso específica para este arquivo
+        async def file_progress(current, total):
+            await progress_callback(current, total, progress_msg, filename, start_time)
+        
+        # Download com progresso
+        file_content = await event.download_media(
+            bytes, 
+            progress_callback=file_progress
+        )
         
         if not file_content:
-            await processing_msg.edit("❌ **Erro:** Não foi possível baixar o arquivo")
+            await progress_msg.edit("❌ **Erro:** Não foi possível baixar o arquivo")
             return
         
-        logger.info(f"Download concluído: {len(file_content)} bytes")
+        download_time = time.time() - start_time
+        logger.info(f"Download concluído: {len(file_content)} bytes em {download_time:.1f}s")
+        
+        # Atualiza para processamento
+        await progress_msg.edit(
+            f"✅ **Download Concluído!**\n\n"
+            f"📁 **Arquivo:** `{filename}`\n"
+            f"📏 **Tamanho:** {len(file_content) / 1024 / 1024:.1f} MB\n"
+            f"⏱️ **Tempo:** {download_time:.1f}s\n"
+            f"🚀 **Velocidade:** {len(file_content) / download_time / (1024*1024):.1f} MB/s\n\n"
+            f"🔄 **Iniciando processamento...**\n"
+            f"⚡ Filtrando spam e detectando URLs brasileiras..."
+        )
         
         # Inicializa variáveis
         credenciais = []
         br_creds = []
         stats = {'total_lines': 0, 'valid_lines': 0, 'brazilian_lines': 0, 'spam_removed': 0}
         
-        # Processa baseado no tipo
+        # Processa baseado no tipo com progresso
         logger.info(f"Iniciando processamento: {filename}")
+        processing_start = time.time()
+        
+        # Atualiza progresso do processamento
+        await progress_msg.edit(
+            f"🔄 **Processando Arquivo**\n\n"
+            f"📁 **Arquivo:** `{filename}`\n"
+            f"📏 **Tamanho:** {len(file_content) / 1024 / 1024:.1f} MB\n\n"
+            f"⚡ **Etapa atual:**\n"
+            f"• 📖 Lendo conteúdo do arquivo...\n"
+            f"• 🛡️ Aplicando filtros de spam...\n"
+            f"• 🇧🇷 Detectando URLs brasileiras...\n\n"
+            f"⏳ **Aguarde...** Pode levar alguns segundos para arquivos grandes"
+        )
         
         if filename.lower().endswith('.txt'):
             credenciais, br_creds, stats = await processar_arquivo_texto(
                 file_content, filename, event.chat_id
             )
         elif filename.lower().endswith('.zip'):
+            # Atualiza para ZIP
+            await progress_msg.edit(
+                f"🔄 **Processando ZIP**\n\n"
+                f"📁 **Arquivo:** `{filename}`\n"
+                f"📦 **Tipo:** Arquivo compactado ZIP\n\n"
+                f"⚡ **Etapa atual:**\n"
+                f"• 📦 Extraindo arquivos TXT do ZIP...\n"
+                f"• 🔍 Analisando cada arquivo interno...\n"
+                f"• 🛡️ Aplicando filtros avançados...\n\n"
+                f"⏳ **Aguarde...** Processando múltiplos arquivos"
+            )
             credenciais, br_creds, stats = await processar_arquivo_zip(
                 file_content, filename, event.chat_id
             )
         elif filename.lower().endswith('.rar'):
+            # Atualiza para RAR
+            await progress_msg.edit(
+                f"🔄 **Processando RAR**\n\n"
+                f"📁 **Arquivo:** `{filename}`\n"
+                f"📦 **Tipo:** Arquivo compactado RAR\n\n"
+                f"⚡ **Etapa atual:**\n"
+                f"• 📦 Extraindo arquivos TXT do RAR...\n"
+                f"• 🔍 Analisando cada arquivo interno...\n"
+                f"• 🛡️ Aplicando filtros avançados...\n\n"
+                f"⏳ **Aguarde...** Processando múltiplos arquivos"
+            )
             credenciais, br_creds, stats = await processar_arquivo_rar(
                 file_content, filename, event.chat_id
             )
         
-        logger.info(f"Processamento finalizado: {stats['valid_lines']} válidas de {stats['total_lines']}")
+        processing_time = time.time() - processing_start
+        logger.info(f"Processamento finalizado: {stats['valid_lines']} válidas de {stats['total_lines']} em {processing_time:.1f}s")
         
-        # Atualiza mensagem com resultado
+        # Atualiza mensagem com resultado completo
         if stats['valid_lines'] > 0:
+            total_time = time.time() - start_time
             result_text = f"""
 ✅ **Processamento Concluído!**
 
 📁 **Arquivo:** `{filename}`
+📏 **Tamanho:** {len(file_content) / 1024 / 1024:.1f} MB
+
+⏱️ **Tempos:**
+• ⬇️ Download: {download_time:.1f}s
+• 🔄 Processamento: {processing_time:.1f}s
+• ⏰ Total: {total_time:.1f}s
+
 📊 **Estatísticas:**
 • 📝 Total processado: {stats['total_lines']:,} linhas
 • ✅ Credenciais válidas: {stats['valid_lines']:,}
 • 🇧🇷 URLs brasileiras: {stats['brazilian_lines']:,}
 • 🗑️ Spam removido: {stats['spam_removed']:,}
 • 📈 Taxa válida: {(stats['valid_lines']/max(1,stats['total_lines'])*100):.1f}%
+• ⚡ Velocidade: {stats['total_lines']/processing_time:.0f} linhas/s
 
 🔄 **Enviando arquivos filtrados...**
             """
-            await processing_msg.edit(result_text)
+            await progress_msg.edit(result_text)
             
             # Envia arquivo com todas as credenciais válidas
             if credenciais:
@@ -536,9 +662,12 @@ async def document_handler(event):
             )
         
         else:
-            await processing_msg.edit(
+            total_time = time.time() - start_time
+            await progress_msg.edit(
                 f"❌ **Nenhuma credencial válida encontrada**\n\n"
                 f"📁 **Arquivo:** `{filename}`\n"
+                f"📏 **Tamanho:** {len(file_content) / 1024 / 1024:.1f} MB\n"
+                f"⏱️ **Tempo total:** {total_time:.1f}s\n\n"
                 f"📊 **Motivos:**\n"
                 f"• {stats['spam_removed']:,} linhas de spam/divulgação removidas\n"
                 f"• {stats['total_lines'] - stats['spam_removed']:,} linhas com formato inválido\n\n"
@@ -546,19 +675,23 @@ async def document_handler(event):
             )
     
     except Exception as e:
+        error_time = time.time() - start_time
         logger.error(f"Erro no processamento do arquivo {filename}: {e}")
         import traceback
         logger.error(f"Traceback completo: {traceback.format_exc()}")
         
-        await processing_msg.edit(
-            f"❌ **Erro no processamento:**\n"
-            f"**Arquivo:** `{filename}`\n"
-            f"**Erro:** `{str(e)[:100]}`\n\n"
-            f"**Soluções:**\n"
+        await progress_msg.edit(
+            f"❌ **Erro no processamento:**\n\n"
+            f"📁 **Arquivo:** `{filename}`\n"
+            f"📏 **Tamanho:** {file_size / 1024 / 1024:.1f} MB\n"
+            f"⏱️ **Tempo até erro:** {error_time:.1f}s\n"
+            f"🚨 **Erro:** `{str(e)[:80]}...`\n\n"
+            f"**💡 Soluções:**\n"
             f"• Verifique se o arquivo não está corrompido\n"
             f"• Tente com arquivo menor primeiro\n"
-            f"• Use formato TXT simples\n\n"
-            f"**Suporte:** Entre em contato se o erro persistir"
+            f"• Use formato TXT simples\n"
+            f"• Verifique se há caracteres especiais no nome\n\n"
+            f"**📞 Suporte:** Entre em contato se o erro persistir"
         )
 
 @bot.on(events.NewMessage(pattern=r'^/help$'))
