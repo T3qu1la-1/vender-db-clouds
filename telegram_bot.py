@@ -46,24 +46,35 @@ except (ValueError, TypeError):
     logger.error("❌ API_ID e ADMIN_ID devem ser números!")
     exit(1)
 
-# Cliente Telethon com configurações otimizadas
+# Cliente Telethon com configurações ultra otimizadas para múltiplos usuários
 bot = TelegramClient(
     'bot',
     api_id_int,
     API_HASH,
-    timeout=60,
-    request_retries=3,
-    connection_retries=3,
-    retry_delay=2,
-    flood_sleep_threshold=60
+    timeout=120,                 # Timeout maior para arquivos grandes
+    request_retries=5,           # Mais tentativas
+    connection_retries=5,        # Mais tentativas de conexão
+    retry_delay=1,               # Delay menor entre tentativas
+    flood_sleep_threshold=30,    # Mais tolerante a flood
+    auto_reconnect=True,         # Reconexão automática
+    sequential_updates=False,    # Updates paralelos
+    receive_updates=True,        # Recebe updates
+    connection_retries_delay=2,  # Delay entre reconnects
+    device_model="BotServer",
+    system_version="Linux",
+    app_version="4.0",
+    lang_code="pt",
+    system_lang_code="pt"
 )
 
 # Controle do painel web
 painel_ativo = False
 
-# Controle de uploads em lote
+# Controle de uploads em lote com limite de usuários simultâneos
 upload_tasks = {}  # {chat_id: {'active': bool, 'files': [], 'results': []}}
 processing_queue = {}  # {chat_id: asyncio.Queue}
+MAX_CONCURRENT_USERS = 50  # Limite de usuários simultâneos
+user_activity = {}  # {chat_id: timestamp} para limpeza automática
 
 # SQLite para histórico de usuários e contadores
 USER_HISTORY_DB = "user_history.db"
@@ -198,6 +209,47 @@ def generate_filename(user_id, username, finalization_number, file_type):
 
 # Inicializa SQLite no startup
 init_user_history_db()
+
+# Sistema de limpeza automática para múltiplos usuários
+async def cleanup_inactive_users():
+    """Limpa usuários inativos automaticamente para economizar RAM"""
+    while True:
+        try:
+            current_time = time.time()
+            inactive_users = []
+            
+            # Verifica usuários inativos (mais de 10 minutos)
+            for chat_id, last_activity in user_activity.items():
+                if current_time - last_activity > 600:  # 10 minutos
+                    inactive_users.append(chat_id)
+            
+            # Remove usuários inativos
+            for chat_id in inactive_users:
+                if chat_id in upload_tasks:
+                    upload_tasks[chat_id]['active'] = False
+                    del upload_tasks[chat_id]
+                    logger.info(f"🧹 Usuário inativo removido: {chat_id}")
+                
+                if chat_id in processing_queue:
+                    del processing_queue[chat_id]
+                
+                if chat_id in user_activity:
+                    del user_activity[chat_id]
+            
+            # Limita usuários simultâneos
+            if len(upload_tasks) > MAX_CONCURRENT_USERS:
+                oldest_users = sorted(user_activity.items(), key=lambda x: x[1])[:10]
+                for chat_id, _ in oldest_users:
+                    if chat_id in upload_tasks:
+                        upload_tasks[chat_id]['active'] = False
+                        del upload_tasks[chat_id]
+                        logger.info(f"🧹 Usuário removido por limite: {chat_id}")
+            
+            await asyncio.sleep(60)  # Verifica a cada minuto
+            
+        except Exception as e:
+            logger.error(f"Erro na limpeza automática: {e}")
+            await asyncio.sleep(60)
 
 # ========== FUNÇÕES DE FILTRAGEM (do painel original) ==========
 
@@ -544,16 +596,18 @@ async def enviar_resultado_como_arquivo(chat_id, credenciais, tipo, stats, user_
 # ========== FUNÇÃO DE PROGRESSO CORRIGIDA ==========
 
 async def create_progress_callback(progress_msg, filename):
-    """Cria callback de progresso otimizado"""
-    last_update = [0]  # Lista para permitir modificação dentro da função aninhada
+    """Cria callback de progresso ultra otimizado para velocidade máxima"""
+    last_update = [0]
     start_time = time.time()
+    update_count = [0]
 
     async def progress_callback(current, total):
         try:
             now = time.time()
+            update_count[0] += 1
 
-            # Atualiza apenas a cada 2 segundos ou 10% para ser mais rápido
-            if now - last_update[0] < 2:
+            # Atualiza apenas a cada 5 segundos para não atrasar o download
+            if now - last_update[0] < 5:
                 return
 
             last_update[0] = now
@@ -563,46 +617,38 @@ async def create_progress_callback(progress_msg, filename):
             elapsed = now - start_time
 
             if elapsed > 0 and current > 0:
-                speed = current / elapsed  # bytes por segundo
-                speed_mb = speed / (1024 * 1024)  # MB/s
+                speed = current / elapsed
+                speed_mb = speed / (1024 * 1024)
 
-                # Estima tempo restante
+                # ETA mais simples
                 remaining_bytes = total - current
-                if speed > 0:
-                    eta_seconds = remaining_bytes / speed
-                    if eta_seconds < 60:
-                        eta_str = f"{eta_seconds:.0f}s"
-                    elif eta_seconds < 3600:
-                        eta_str = f"{eta_seconds/60:.1f}min"
-                    else:
-                        eta_str = f"{eta_seconds/3600:.1f}h"
-                else:
-                    eta_str = "calculando..."
+                eta_seconds = remaining_bytes / speed if speed > 0 else 0
+                eta_str = f"{eta_seconds/60:.1f}min" if eta_seconds > 60 else f"{eta_seconds:.0f}s"
             else:
                 speed_mb = 0
                 eta_str = "calculando..."
 
-            # Barra de progresso visual mais simples
-            filled = int(percent / 10)  # 10 blocos = 100%
-            bar = "█" * filled + "░" * (10 - filled)
+            # Progresso mais simples e rápido
+            filled = int(percent / 5)  # 20 blocos = 100%
+            bar = "█" * filled + "░" * (20 - filled)
 
-            progress_text = f"""📥 **Download Ultra Rápido**
+            progress_text = f"""⚡ **Download ULTRA RÁPIDO** ⚡
 
 📁 `{filename}`
-📊 {percent:.1f}% {bar}
+{bar} {percent:.1f}%
 
-⬇️ {current/(1024*1024):.1f}/{total/(1024*1024):.1f} MB
-🚀 {speed_mb:.1f} MB/s | ⏱️ {eta_str}"""
+📊 {current/(1024*1024):.1f}/{total/(1024*1024):.1f} MB
+🚀 **{speed_mb:.1f} MB/s** | ⏱️ {eta_str}
+
+💡 _Updates a cada 5s para máxima velocidade_"""
 
             try:
                 await progress_msg.edit(progress_text)
             except Exception:
-                # Se der erro na edição, ignora para não parar download
                 pass
 
-        except Exception as e:
-            # Se der erro no progresso, não interrompe o download
-            logger.error(f"Erro no callback de progresso: {e}")
+        except Exception:
+            pass
 
     return progress_callback
 
@@ -642,11 +688,25 @@ Digite `/adicionar` para começar!"""
 
 @bot.on(events.NewMessage(pattern=r'^/adicionar$'))
 async def adicionar_handler(event):
-    """Handler do comando /adicionar"""
+    """Handler do comando /adicionar otimizado para múltiplos usuários"""
     chat_id = event.chat_id
     user_id = event.sender_id
 
     logger.info(f"Comando /adicionar recebido de {user_id} no chat {chat_id}")
+    
+    # Atualiza atividade do usuário
+    user_activity[chat_id] = time.time()
+
+    # Verifica limite de usuários simultâneos
+    if len(upload_tasks) >= MAX_CONCURRENT_USERS and chat_id not in upload_tasks:
+        await event.reply(
+            "⚠️ **Muitos usuários ativos!**\n\n"
+            f"🔄 Limite atual: **{MAX_CONCURRENT_USERS} usuários simultâneos**\n"
+            f"📊 Ativos agora: **{len(upload_tasks)} usuários**\n\n"
+            "⏳ Aguarde alguns minutos e tente novamente\n"
+            "🧹 Sistema limpa usuários inativos automaticamente"
+        )
+        return
 
     # Cancela upload anterior se existir
     if chat_id in upload_tasks:
@@ -754,16 +814,19 @@ async def processar_arquivo_individual(chat_id, file_info):
             f"⚡ **Iniciando download otimizado...**"
         )
 
-        # Download ultra otimizado
+        # Download ULTRA OTIMIZADO com configurações máximas
         start_time = time.time()
 
-        # Callback de progresso
+        # Callback de progresso otimizado
         progress_callback = await create_progress_callback(progress_msg, filename)
 
-        # Download com chunks grandes para velocidade máxima
+        # Download com chunks GIGANTES para velocidade máxima (2MB chunks)
         file_content = await event.download_media(
             bytes,
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
+            file_size=file_size,
+            chunk_size=2097152,  # 2MB chunks para máxima velocidade
+            workers=4            # 4 workers paralelos
         )
 
         if not file_content:
@@ -941,6 +1004,9 @@ async def document_handler(event):
         return
 
     chat_id = event.chat_id
+    
+    # Atualiza atividade do usuário
+    user_activity[chat_id] = time.time()
 
     # Verifica se modo adição está ativo
     if chat_id not in upload_tasks or not upload_tasks[chat_id]['active']:
@@ -1314,6 +1380,10 @@ async def main():
             return
 
         logger.info("✅ Bot conectado com otimizações! Aguardando mensagens...")
+        
+        # Inicia sistema de limpeza automática em background
+        asyncio.create_task(cleanup_inactive_users())
+        logger.info("🧹 Sistema de limpeza automática iniciado")
 
         # Mantém o bot rodando
         await bot.run_until_disconnected()
