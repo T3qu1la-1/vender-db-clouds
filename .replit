@@ -6,7 +6,7 @@ packages = ["glibcLocales", "libarchive", "openssl", "postgresql", "unrar"]
 
 [deployment]
 deploymentTarget = "autoscale"
-run = ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
+run = ["python", "app_web.py"]
 
 [workflows]
 runButton = "Project"
@@ -63,18 +63,19 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Bot Telegram"
+args = "Web App"
 
 [[workflows.workflow]]
-name = "Bot Telegram"
+name = "Web App"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python telegram_bot.py"
+args = "python app_web.py"
+waitForPort = 5000
 
 [workflows.workflow.metadata]
-outputType = "console"
+outputType = "webview"
 
 [[ports]]
 localPort = 5000

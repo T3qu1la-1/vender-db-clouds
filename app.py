@@ -17,7 +17,7 @@ logging.basicConfig(level=logging.ERROR, format='%(message)s')
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SESSION_SECRET", "dev-secret-key-change-in-production")
+app.secret_key = "minha-chave-secreta-super-segura-12345"
 
 # Configuração para Replit (ProxyFix para headers corretos)
 from werkzeug.middleware.proxy_fix import ProxyFix

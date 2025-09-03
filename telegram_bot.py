@@ -29,22 +29,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ========== CONFIGURAÇÕES DO BOT TELETHON ==========
-# Credenciais obtidas das variáveis de ambiente
-API_ID = os.environ.get("API_ID")
-API_HASH = os.environ.get("API_HASH")
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+# Credenciais hardcoded conforme solicitado
+API_ID = "25317254"
+API_HASH = "bef2f48bb6b4120c9189ecfd974eb820"
+BOT_TOKEN = "8287218911:AAGwVkojvUEalSMZD58zx4jtjRgR2adGKVQ"
 ADMIN_ID = os.environ.get("ADMIN_ID", "123456789")  # ID do admin
 
-if not API_ID or not API_HASH or not BOT_TOKEN:
-    logger.error("❌ Configurações faltando! Configure: API_ID, API_HASH, TELEGRAM_BOT_TOKEN")
-    exit(1)
-
-try:
-    api_id_int = int(API_ID)
-    admin_id_int = int(ADMIN_ID)
-except (ValueError, TypeError):
-    logger.error("❌ API_ID e ADMIN_ID devem ser números!")
-    exit(1)
+api_id_int = 25317254
+admin_id_int = int(ADMIN_ID)
 
 # Cliente Telethon com configurações ultra otimizadas para múltiplos usuários
 bot = TelegramClient(
@@ -59,7 +51,7 @@ bot = TelegramClient(
     auto_reconnect=True,         # Reconexão automática
     sequential_updates=False,    # Updates paralelos
     receive_updates=True,        # Recebe updates
-    connection_retries_delay=2,  # Delay entre reconnects
+    # connection_retries_delay=2,  # Param not supported in this Telethon version
     device_model="BotServer",
     system_version="Linux",
     app_version="4.0",
@@ -546,7 +538,7 @@ async def processar_arquivo_rar(content, filename, chat_id):
         logger.error(f"Erro no RAR: {e}")
         # Remove arquivo temporário se existir
         try:
-            if 'temp_path' in locals() and os.path.exists(temp_path):
+            if 'temp_path' in locals() and temp_path and os.path.exists(temp_path):
                 os.remove(temp_path)
         except:
             pass
@@ -610,7 +602,7 @@ async def create_progress_callback(progress_msg, filename):
             if now - last_update[0] < 5:
                 return
 
-            last_update[0] = now
+            last_update[0] = int(now)
 
             # Calcula estatísticas
             percent = (current / total) * 100
@@ -847,6 +839,10 @@ async def processar_arquivo_individual(chat_id, file_info):
         # Processa arquivo com timing
         processing_start = time.time()
 
+        credenciais = []
+        br_creds = []
+        stats = {'total_lines': 0, 'valid_lines': 0, 'brazilian_lines': 0, 'spam_removed': 0}
+        
         if filename.lower().endswith('.txt'):
             credenciais, br_creds, stats = await processar_arquivo_texto(
                 file_content, filename, chat_id
@@ -896,7 +892,8 @@ async def processar_arquivo_individual(chat_id, file_info):
             buttons=buttons
         )
 
-        logger.info(f"Arquivo {current_file} processado: {filename} - {stats['valid_lines']} válidas - {speed_total:.1f} MB/s")
+        if 'filename' in locals() and filename:
+            logger.info(f"Arquivo {current_file} processado: {filename} - {stats['valid_lines']} válidas - {speed_total:.1f} MB/s")
 
     except Exception as e:
         logger.error(f"Erro no processamento individual: {e}")
@@ -922,8 +919,8 @@ async def finalizar_processamento_lote(chat_id, user_triggered=False):
         # Obtém informações do usuário
         try:
             user = await bot.get_entity(chat_id)
-            user_id = user.id
-            username = user.username or f"user{user_id}"
+            user_id = user.id if hasattr(user, 'id') else chat_id
+            username = getattr(user, 'username', f"user{user_id}") or f"user{user_id}"
             first_name = getattr(user, 'first_name', '') or ''
             last_name = getattr(user, 'last_name', '') or ''
         except:
@@ -996,7 +993,7 @@ async def finalizar_processamento_lote(chat_id, user_triggered=False):
             f"Digite `/adicionar` para recomeçar"
         )
 
-@bot.on(events.NewMessage)
+@bot.on(events.NewMessage())
 async def document_handler(event):
     """Handler para documentos enviados - sistema de fila OTIMIZADO"""
     # Só processa documentos
@@ -1228,7 +1225,7 @@ async def desativar_web_handler(event):
         "Para reativar, use `/ativarweb`"
     )
 
-@bot.on(events.CallbackQuery)
+@bot.on(events.CallbackQuery())
 async def callback_handler(event):
     """Handler para callbacks dos botões inline"""
     try:
@@ -1393,4 +1390,5 @@ async def main():
         raise
 
 if __name__ == "__main__":
-    bot.loop.run_until_complete(main())
+    import asyncio
+    asyncio.run(main())
