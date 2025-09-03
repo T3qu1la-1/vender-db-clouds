@@ -351,22 +351,31 @@ async def enviar_resultado_como_arquivo(chat_id, credenciais, tipo, stats):
         await bot.send_message(chat_id, f"❌ Nenhuma credencial {tipo} encontrada.")
         return
     
-    # Cria conteúdo do arquivo
-    content = '\n'.join(credenciais)
-    
-    # Nome do arquivo com timestamp
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    filename = f"credenciais_{tipo}_{timestamp}.txt"
-    
-    # Envia como arquivo
-    await bot.send_file(
-        chat_id,
-        io.BytesIO(content.encode('utf-8')),
-        attributes=[DocumentAttributeFilename(filename)],
-        caption=f"📁 **{filename}**\n\n"
-               f"✅ {len(credenciais):,} credenciais {tipo}\n"
-               f"📊 Taxa: {(stats['valid_lines']/max(1,stats['total_lines'])*100):.1f}%"
-    )
+    try:
+        # Cria conteúdo do arquivo
+        content = '\n'.join(credenciais)
+        
+        # Nome do arquivo com timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"credenciais_{tipo}_{timestamp}.txt"
+        
+        logger.info(f"Enviando arquivo: {filename} com {len(credenciais)} credenciais")
+        
+        # Envia como arquivo
+        await bot.send_file(
+            chat_id,
+            io.BytesIO(content.encode('utf-8')),
+            attributes=[DocumentAttributeFilename(filename)],
+            caption=f"📁 **{filename}**\n\n"
+                   f"✅ {len(credenciais):,} credenciais {tipo}\n"
+                   f"📊 Taxa: {(stats['valid_lines']/max(1,stats['total_lines'])*100):.1f}%"
+        )
+        
+        logger.info(f"Arquivo enviado com sucesso: {filename}")
+        
+    except Exception as e:
+        logger.error(f"Erro ao enviar arquivo {tipo}: {e}")
+        await bot.send_message(chat_id, f"❌ Erro ao enviar arquivo {tipo}: {str(e)[:100]}")
 
 # ========== HANDLERS DO BOT ==========
 
@@ -417,9 +426,10 @@ async def adicionar_handler(event):
         "🔄 Envie quantos arquivos quiser!"
     )
 
-@bot.on(events.NewMessage(func=lambda e: e.document is not None))
+@bot.on(events.NewMessage)
 async def document_handler(event):
     """Handler para documentos enviados"""
+    # Só processa se tem documento
     if not event.document:
         return
     
@@ -431,7 +441,7 @@ async def document_handler(event):
             break
     
     if not filename:
-        return
+        filename = f"arquivo_{int(time.time())}.txt"  # Nome padrão se não tiver
     
     # Verifica formato suportado
     if not filename.lower().endswith(('.txt', '.zip', '.rar')):
@@ -457,7 +467,14 @@ async def document_handler(event):
     
     try:
         # Download do arquivo da nuvem do Telegram
+        logger.info(f"Iniciando download: {filename}")
         file_content = await event.download_media(bytes)
+        
+        if not file_content:
+            await processing_msg.edit("❌ **Erro:** Não foi possível baixar o arquivo")
+            return
+        
+        logger.info(f"Download concluído: {len(file_content)} bytes")
         
         # Inicializa variáveis
         credenciais = []
@@ -465,6 +482,8 @@ async def document_handler(event):
         stats = {'total_lines': 0, 'valid_lines': 0, 'brazilian_lines': 0, 'spam_removed': 0}
         
         # Processa baseado no tipo
+        logger.info(f"Iniciando processamento: {filename}")
+        
         if filename.lower().endswith('.txt'):
             credenciais, br_creds, stats = await processar_arquivo_texto(
                 file_content, filename, event.chat_id
@@ -477,6 +496,8 @@ async def document_handler(event):
             credenciais, br_creds, stats = await processar_arquivo_rar(
                 file_content, filename, event.chat_id
             )
+        
+        logger.info(f"Processamento finalizado: {stats['valid_lines']} válidas de {stats['total_lines']}")
         
         # Atualiza mensagem com resultado
         if stats['valid_lines'] > 0:
@@ -525,11 +546,19 @@ async def document_handler(event):
             )
     
     except Exception as e:
-        logger.error(f"Erro no processamento: {e}")
+        logger.error(f"Erro no processamento do arquivo {filename}: {e}")
+        import traceback
+        logger.error(f"Traceback completo: {traceback.format_exc()}")
+        
         await processing_msg.edit(
             f"❌ **Erro no processamento:**\n"
-            f"`{str(e)[:100]}`\n\n"
-            f"Tente novamente ou verifique o arquivo."
+            f"**Arquivo:** `{filename}`\n"
+            f"**Erro:** `{str(e)[:100]}`\n\n"
+            f"**Soluções:**\n"
+            f"• Verifique se o arquivo não está corrompido\n"
+            f"• Tente com arquivo menor primeiro\n"
+            f"• Use formato TXT simples\n\n"
+            f"**Suporte:** Entre em contato se o erro persistir"
         )
 
 @bot.on(events.NewMessage(pattern=r'^/help$'))
@@ -781,6 +810,22 @@ Digite `/adicionar` e envie seus arquivos!
     """
     
     await event.reply(stats_text)
+
+@bot.on(events.NewMessage(pattern=r'^/teste$'))
+async def teste_handler(event):
+    """Handler do comando /teste - para testar funcionamento"""
+    await event.reply(
+        "✅ **Bot funcionando perfeitamente!**\n\n"
+        "🔧 **Teste de funcionalidades:**\n"
+        "• Recebimento de mensagens: ✅\n"
+        "• Envio de respostas: ✅\n"
+        "• Processamento de comandos: ✅\n\n"
+        "📤 **Para testar upload:**\n"
+        "1. Digite `/adicionar`\n"
+        "2. Envie um arquivo TXT pequeno\n"
+        "3. Aguarde o processamento\n\n"
+        "Se ainda tiver problemas, use `/help`"
+    )
 
 # ========== FUNÇÃO PRINCIPAL ==========
 
