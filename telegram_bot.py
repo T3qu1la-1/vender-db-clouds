@@ -51,6 +51,10 @@ bot = TelegramClient('bot', api_id_int, API_HASH)
 # Controle do painel web
 painel_ativo = False
 
+# Controle de uploads em lote
+upload_tasks = {}  # {chat_id: {'active': bool, 'files': [], 'results': []}}
+processing_queue = {}  # {chat_id: asyncio.Queue}
+
 # ========== FUNÇÕES DE FILTRAGEM (do painel original) ==========
 
 def detectar_url_brasileira(url):
@@ -412,19 +416,44 @@ Digite `/adicionar` para começar!"""
 @bot.on(events.NewMessage(pattern=r'^/adicionar$'))
 async def adicionar_handler(event):
     """Handler do comando /adicionar"""
-    logger.info(f"Comando /adicionar recebido de {event.sender_id}")
+    chat_id = event.chat_id
+    user_id = event.sender_id
+    
+    logger.info(f"Comando /adicionar recebido de {user_id} no chat {chat_id}")
+    
+    # Inicializa controle de upload para este chat
+    upload_tasks[chat_id] = {
+        'active': True,
+        'files': [],
+        'results': {'credenciais': [], 'brasileiras': []},
+        'stats': {'total_lines': 0, 'valid_lines': 0, 'brazilian_lines': 0, 'spam_removed': 0},
+        'files_count': 0,
+        'processed_count': 0
+    }
+    
+    # Cria fila de processamento
+    processing_queue[chat_id] = asyncio.Queue()
+    
     await event.reply(
-        "📤 **Modo Adição Ativado!**\n\n"
-        "Agora envie seus arquivos:\n"
+        "📤 **Modo Processamento em Lote Ativado!**\n\n"
+        "🚀 **Novo sistema:**\n"
+        "• Envie **vários arquivos de uma vez**\n"
+        "• Download e processamento **um por vez**\n"
+        "• **Progresso detalhado** de cada arquivo\n"
+        "• **Resultado final unificado** no fim\n\n"
+        "📁 **Formatos suportados:**\n"
         "• 📄 TXT - Arquivos de texto\n"
         "• 📦 ZIP - Compactados ZIP\n" 
         "• 📦 RAR - Compactados RAR\n\n"
-        "⚡ **Processamento automático:**\n"
+        "⚡ **Funcionalidades:**\n"
         "• Filtragem de spam/divulgação\n"
         "• Detecção de URLs brasileiras\n"
-        "• Resultado limpo URL:USER:PASS\n\n"
-        "🔄 Envie quantos arquivos quiser!"
+        "• Processamento na nuvem do Telegram\n\n"
+        "🔄 **Envie seus arquivos!** (ou `/cancelarupload` para cancelar)"
     )
+    
+    # Inicia processador em background
+    asyncio.create_task(processar_fila_uploads(chat_id))
 
 @bot.on(events.NewMessage)
 async def progress_callback(current, total, progress_msg, filename, start_time):
@@ -485,55 +514,112 @@ async def progress_callback(current, total, progress_msg, filename, start_time):
         # Se der erro no progresso, não interrompe o download
         logger.error(f"Erro no callback de progresso: {e}")
 
-async def document_handler(event):
-    """Handler para documentos enviados"""
-    # Só processa se tem documento
-    if not event.document:
-        return
+@bot.on(events.NewMessage(pattern=r'^/adicionar$'))
+async def adicionar_handler(event):
+    """Handler do comando /adicionar"""
+    chat_id = event.chat_id
+    user_id = event.sender_id
     
-    # Verifica se tem filename
-    filename = None
-    for attr in event.document.attributes:
-        if hasattr(attr, 'file_name'):
-            filename = attr.file_name
-            break
+    logger.info(f"Comando /adicionar recebido de {user_id} no chat {chat_id}")
     
-    if not filename:
-        filename = f"arquivo_{int(time.time())}.txt"  # Nome padrão se não tiver
+    # Inicializa controle de upload para este chat
+    upload_tasks[chat_id] = {
+        'active': True,
+        'files': [],
+        'results': {'credenciais': [], 'brasileiras': []},
+        'stats': {'total_lines': 0, 'valid_lines': 0, 'brazilian_lines': 0, 'spam_removed': 0},
+        'files_count': 0,
+        'processed_count': 0
+    }
     
-    # Verifica formato suportado
-    if not filename.lower().endswith(('.txt', '.zip', '.rar')):
-        await event.reply("❌ Formato não suportado! Use apenas TXT, ZIP ou RAR.")
-        return
+    # Cria fila de processamento
+    processing_queue[chat_id] = asyncio.Queue()
     
-    # Verifica tamanho (limite Telegram: 2GB para bots)
-    file_size = event.document.size
-    if file_size > 2 * 1024 * 1024 * 1024:  # 2GB
-        await event.reply(
-            "❌ Arquivo muito grande!\n"
-            "Limite: 2GB\n"
-            "Divida em partes menores."
-        )
-        return
-    
-    # Mensagem inicial de progresso
-    progress_msg = await event.reply(
-        f"📥 **Preparando Download**\n\n"
-        f"📁 **Arquivo:** `{filename}`\n"
-        f"📏 **Tamanho:** {file_size / 1024 / 1024:.1f} MB\n"
-        f"⚡ **Iniciando...** Sistema de progresso ativado!"
+    await event.reply(
+        "📤 **Modo Processamento em Lote Ativado!**\n\n"
+        "🚀 **Novo sistema:**\n"
+        "• Envie **vários arquivos de uma vez**\n"
+        "• Download e processamento **um por vez**\n"
+        "• **Progresso detalhado** de cada arquivo\n"
+        "• **Resultado final unificado** no fim\n\n"
+        "📁 **Formatos suportados:**\n"
+        "• 📄 TXT - Arquivos de texto\n"
+        "• 📦 ZIP - Compactados ZIP\n" 
+        "• 📦 RAR - Compactados RAR\n\n"
+        "⚡ **Funcionalidades:**\n"
+        "• Filtragem de spam/divulgação\n"
+        "• Detecção de URLs brasileiras\n"
+        "• Processamento na nuvem do Telegram\n\n"
+        "🔄 **Envie seus arquivos!** (ou `/cancelarupload` para cancelar)"
     )
     
+    # Inicia processador em background
+    asyncio.create_task(processar_fila_uploads(chat_id))
+
+async def processar_fila_uploads(chat_id):
+    """Processa fila de uploads um por vez"""
+    logger.info(f"Iniciando processador de fila para chat {chat_id}")
+    
     try:
-        # Download do arquivo com callback de progresso
-        logger.info(f"Iniciando download com progresso: {filename}")
+        while chat_id in upload_tasks and upload_tasks[chat_id]['active']:
+            try:
+                # Aguarda novo arquivo na fila (timeout 5 segundos)
+                file_info = await asyncio.wait_for(
+                    processing_queue[chat_id].get(), 
+                    timeout=5.0
+                )
+                
+                # Verifica se upload ainda ativo
+                if not upload_tasks[chat_id]['active']:
+                    logger.info(f"Upload cancelado para chat {chat_id}")
+                    break
+                
+                await processar_arquivo_individual(chat_id, file_info)
+                
+            except asyncio.TimeoutError:
+                # Timeout normal - continue aguardando
+                continue
+            except Exception as e:
+                logger.error(f"Erro no processador de fila {chat_id}: {e}")
+                break
+        
+        # Verifica se tem arquivos para finalizar
+        if chat_id in upload_tasks and upload_tasks[chat_id]['processed_count'] > 0:
+            await finalizar_processamento_lote(chat_id)
+    
+    except Exception as e:
+        logger.error(f"Erro crítico no processador {chat_id}: {e}")
+        if chat_id in upload_tasks:
+            await bot.send_message(
+                chat_id,
+                f"❌ **Erro crítico no processamento:** `{str(e)[:100]}`\n"
+                f"Digite `/adicionar` para recomeçar"
+            )
+
+async def processar_arquivo_individual(chat_id, file_info):
+    """Processa um arquivo individual"""
+    try:
+        event, filename, file_size = file_info
+        
+        # Atualiza contador
+        upload_tasks[chat_id]['files_count'] += 1
+        current_file = upload_tasks[chat_id]['files_count']
+        
+        # Mensagem de progresso
+        progress_msg = await bot.send_message(
+            chat_id,
+            f"📥 **Download {current_file}º Arquivo**\n\n"
+            f"📁 **Nome:** `{filename}`\n"
+            f"📏 **Tamanho:** {file_size / 1024 / 1024:.1f} MB\n"
+            f"⚡ **Iniciando download com progresso...**"
+        )
+        
+        # Download com callback de progresso
         start_time = time.time()
         
-        # Função de progresso específica para este arquivo
         async def file_progress(current, total):
             await progress_callback(current, total, progress_msg, filename, start_time)
         
-        # Download com progresso
         file_content = await event.download_media(
             bytes, 
             progress_callback=file_progress
@@ -544,155 +630,214 @@ async def document_handler(event):
             return
         
         download_time = time.time() - start_time
-        logger.info(f"Download concluído: {len(file_content)} bytes em {download_time:.1f}s")
         
         # Atualiza para processamento
         await progress_msg.edit(
-            f"✅ **Download Concluído!**\n\n"
-            f"📁 **Arquivo:** `{filename}`\n"
+            f"🔄 **Processando Arquivo {current_file}**\n\n"
+            f"📁 **Nome:** `{filename}`\n"
             f"📏 **Tamanho:** {len(file_content) / 1024 / 1024:.1f} MB\n"
-            f"⏱️ **Tempo:** {download_time:.1f}s\n"
-            f"🚀 **Velocidade:** {len(file_content) / download_time / (1024*1024):.1f} MB/s\n\n"
-            f"🔄 **Iniciando processamento...**\n"
-            f"⚡ Filtrando spam e detectando URLs brasileiras..."
+            f"⏱️ **Download:** {download_time:.1f}s\n\n"
+            f"⚡ **Filtrando spam e URLs brasileiras...**"
         )
         
-        # Inicializa variáveis
-        credenciais = []
-        br_creds = []
-        stats = {'total_lines': 0, 'valid_lines': 0, 'brazilian_lines': 0, 'spam_removed': 0}
-        
-        # Processa baseado no tipo com progresso
-        logger.info(f"Iniciando processamento: {filename}")
+        # Processa arquivo
         processing_start = time.time()
-        
-        # Atualiza progresso do processamento
-        await progress_msg.edit(
-            f"🔄 **Processando Arquivo**\n\n"
-            f"📁 **Arquivo:** `{filename}`\n"
-            f"📏 **Tamanho:** {len(file_content) / 1024 / 1024:.1f} MB\n\n"
-            f"⚡ **Etapa atual:**\n"
-            f"• 📖 Lendo conteúdo do arquivo...\n"
-            f"• 🛡️ Aplicando filtros de spam...\n"
-            f"• 🇧🇷 Detectando URLs brasileiras...\n\n"
-            f"⏳ **Aguarde...** Pode levar alguns segundos para arquivos grandes"
-        )
         
         if filename.lower().endswith('.txt'):
             credenciais, br_creds, stats = await processar_arquivo_texto(
-                file_content, filename, event.chat_id
+                file_content, filename, chat_id
             )
         elif filename.lower().endswith('.zip'):
-            # Atualiza para ZIP
-            await progress_msg.edit(
-                f"🔄 **Processando ZIP**\n\n"
-                f"📁 **Arquivo:** `{filename}`\n"
-                f"📦 **Tipo:** Arquivo compactado ZIP\n\n"
-                f"⚡ **Etapa atual:**\n"
-                f"• 📦 Extraindo arquivos TXT do ZIP...\n"
-                f"• 🔍 Analisando cada arquivo interno...\n"
-                f"• 🛡️ Aplicando filtros avançados...\n\n"
-                f"⏳ **Aguarde...** Processando múltiplos arquivos"
-            )
             credenciais, br_creds, stats = await processar_arquivo_zip(
-                file_content, filename, event.chat_id
+                file_content, filename, chat_id
             )
         elif filename.lower().endswith('.rar'):
-            # Atualiza para RAR
-            await progress_msg.edit(
-                f"🔄 **Processando RAR**\n\n"
-                f"📁 **Arquivo:** `{filename}`\n"
-                f"📦 **Tipo:** Arquivo compactado RAR\n\n"
-                f"⚡ **Etapa atual:**\n"
-                f"• 📦 Extraindo arquivos TXT do RAR...\n"
-                f"• 🔍 Analisando cada arquivo interno...\n"
-                f"• 🛡️ Aplicando filtros avançados...\n\n"
-                f"⏳ **Aguarde...** Processando múltiplos arquivos"
-            )
             credenciais, br_creds, stats = await processar_arquivo_rar(
-                file_content, filename, event.chat_id
+                file_content, filename, chat_id
             )
         
         processing_time = time.time() - processing_start
-        logger.info(f"Processamento finalizado: {stats['valid_lines']} válidas de {stats['total_lines']} em {processing_time:.1f}s")
         
-        # Atualiza mensagem com resultado completo
-        if stats['valid_lines'] > 0:
-            total_time = time.time() - start_time
-            result_text = f"""
-✅ **Processamento Concluído!**
-
-📁 **Arquivo:** `{filename}`
-📏 **Tamanho:** {len(file_content) / 1024 / 1024:.1f} MB
-
-⏱️ **Tempos:**
-• ⬇️ Download: {download_time:.1f}s
-• 🔄 Processamento: {processing_time:.1f}s
-• ⏰ Total: {total_time:.1f}s
-
-📊 **Estatísticas:**
-• 📝 Total processado: {stats['total_lines']:,} linhas
-• ✅ Credenciais válidas: {stats['valid_lines']:,}
-• 🇧🇷 URLs brasileiras: {stats['brazilian_lines']:,}
-• 🗑️ Spam removido: {stats['spam_removed']:,}
-• 📈 Taxa válida: {(stats['valid_lines']/max(1,stats['total_lines'])*100):.1f}%
-• ⚡ Velocidade: {stats['total_lines']/processing_time:.0f} linhas/s
-
-🔄 **Enviando arquivos filtrados...**
-            """
-            await progress_msg.edit(result_text)
-            
-            # Envia arquivo com todas as credenciais válidas
-            if credenciais:
-                await enviar_resultado_como_arquivo(
-                    event.chat_id, credenciais, "geral", stats
-                )
-            
-            # Envia arquivo separado com URLs brasileiras
-            if br_creds:
-                await enviar_resultado_como_arquivo(
-                    event.chat_id, br_creds, "brasileiras", stats
-                )
-            
-            await bot.send_message(
-                event.chat_id,
-                "✅ **Processamento finalizado!**\n\n"
-                "📤 Arquivos enviados com credenciais filtradas.\n"
-                "🔄 Envie mais arquivos para continuar processando!"
-            )
+        # Adiciona aos resultados consolidados
+        upload_tasks[chat_id]['results']['credenciais'].extend(credenciais)
+        upload_tasks[chat_id]['results']['brasileiras'].extend(br_creds)
         
-        else:
-            total_time = time.time() - start_time
-            await progress_msg.edit(
-                f"❌ **Nenhuma credencial válida encontrada**\n\n"
-                f"📁 **Arquivo:** `{filename}`\n"
-                f"📏 **Tamanho:** {len(file_content) / 1024 / 1024:.1f} MB\n"
-                f"⏱️ **Tempo total:** {total_time:.1f}s\n\n"
-                f"📊 **Motivos:**\n"
-                f"• {stats['spam_removed']:,} linhas de spam/divulgação removidas\n"
-                f"• {stats['total_lines'] - stats['spam_removed']:,} linhas com formato inválido\n\n"
-                f"**Formato esperado:** `url:user:pass`"
-            )
-    
-    except Exception as e:
-        error_time = time.time() - start_time
-        logger.error(f"Erro no processamento do arquivo {filename}: {e}")
-        import traceback
-        logger.error(f"Traceback completo: {traceback.format_exc()}")
+        # Soma estatísticas
+        for key in upload_tasks[chat_id]['stats']:
+            upload_tasks[chat_id]['stats'][key] += stats[key]
         
+        upload_tasks[chat_id]['processed_count'] += 1
+        
+        total_time = time.time() - start_time
+        
+        # Resultado do arquivo individual
         await progress_msg.edit(
-            f"❌ **Erro no processamento:**\n\n"
-            f"📁 **Arquivo:** `{filename}`\n"
-            f"📏 **Tamanho:** {file_size / 1024 / 1024:.1f} MB\n"
-            f"⏱️ **Tempo até erro:** {error_time:.1f}s\n"
-            f"🚨 **Erro:** `{str(e)[:80]}...`\n\n"
-            f"**💡 Soluções:**\n"
-            f"• Verifique se o arquivo não está corrompido\n"
-            f"• Tente com arquivo menor primeiro\n"
-            f"• Use formato TXT simples\n"
-            f"• Verifique se há caracteres especiais no nome\n\n"
-            f"**📞 Suporte:** Entre em contato se o erro persistir"
+            f"✅ **Arquivo {current_file} Processado!**\n\n"
+            f"📁 **Nome:** `{filename}`\n"
+            f"📏 **Tamanho:** {len(file_content) / 1024 / 1024:.1f} MB\n"
+            f"⏱️ **Tempo total:** {total_time:.1f}s\n\n"
+            f"📊 **Resultado deste arquivo:**\n"
+            f"• ✅ Válidas: {stats['valid_lines']:,}\n"
+            f"• 🇧🇷 Brasileiras: {stats['brazilian_lines']:,}\n"
+            f"• 🗑️ Spam: {stats['spam_removed']:,}\n\n"
+            f"📈 **Acumulado total:**\n"
+            f"• ✅ {len(upload_tasks[chat_id]['results']['credenciais']):,} credenciais\n"
+            f"• 🇧🇷 {len(upload_tasks[chat_id]['results']['brasileiras']):,} brasileiras\n\n"
+            f"⚡ **Aguardando próximo arquivo ou finalizando...**"
         )
+        
+        logger.info(f"Arquivo {current_file} processado: {filename} - {stats['valid_lines']} válidas")
+        
+    except Exception as e:
+        logger.error(f"Erro no processamento individual: {e}")
+        await bot.send_message(
+            chat_id,
+            f"❌ **Erro no arquivo:** `{filename}`\n"
+            f"**Erro:** {str(e)[:100]}\n"
+            f"⚡ Continuando com próximos arquivos..."
+        )
+
+async def finalizar_processamento_lote(chat_id):
+    """Finaliza processamento e envia resultados consolidados"""
+    try:
+        if chat_id not in upload_tasks:
+            return
+        
+        task_data = upload_tasks[chat_id]
+        total_credenciais = task_data['results']['credenciais']
+        total_brasileiras = task_data['results']['brasileiras']
+        stats_finais = task_data['stats']
+        files_processed = task_data['processed_count']
+        
+        # Mensagem de finalização
+        await bot.send_message(
+            chat_id,
+            f"🎯 **Processamento em Lote Finalizado!**\n\n"
+            f"📊 **Resumo Final:**\n"
+            f"• 📁 Arquivos processados: **{files_processed}**\n"
+            f"• 📝 Linhas totais: **{stats_finais['total_lines']:,}**\n"
+            f"• ✅ Credenciais válidas: **{len(total_credenciais):,}**\n"
+            f"• 🇧🇷 URLs brasileiras: **{len(total_brasileiras):,}**\n"
+            f"• 🗑️ Spam removido: **{stats_finais['spam_removed']:,}**\n\n"
+            f"📈 **Taxa de aproveitamento:** {(len(total_credenciais)/max(1,stats_finais['total_lines'])*100):.1f}%\n\n"
+            f"📤 **Enviando resultados consolidados...**"
+        )
+        
+        # Envia arquivo consolidado geral
+        if total_credenciais:
+            await enviar_resultado_como_arquivo(
+                chat_id, total_credenciais, "LOTE_GERAL", stats_finais
+            )
+        
+        # Envia arquivo consolidado brasileiro
+        if total_brasileiras:
+            await enviar_resultado_como_arquivo(
+                chat_id, total_brasileiras, "LOTE_BRASILEIRAS", stats_finais
+            )
+        
+        # Mensagem de conclusão
+        await bot.send_message(
+            chat_id,
+            f"🎉 **Processamento Completo!**\n\n"
+            f"✅ **Todos os {files_processed} arquivos processados**\n"
+            f"📤 **Resultados consolidados enviados**\n"
+            f"🏁 **Sistema pronto para novos uploads**\n\n"
+            f"🔄 **Para novo lote:** `/adicionar`\n"
+            f"❌ **Para cancelar:** `/cancelarupload`"
+        )
+        
+        # Limpa dados da sessão
+        if chat_id in upload_tasks:
+            del upload_tasks[chat_id]
+        if chat_id in processing_queue:
+            del processing_queue[chat_id]
+        
+        logger.info(f"Processamento em lote finalizado para chat {chat_id}: {len(total_credenciais)} credenciais")
+        
+    except Exception as e:
+        logger.error(f"Erro na finalização do lote {chat_id}: {e}")
+        await bot.send_message(
+            chat_id,
+            f"❌ **Erro na finalização:** `{str(e)[:100]}`\n"
+            f"Digite `/adicionar` para recomeçar"
+        )
+
+@bot.on(events.NewMessage)
+async def document_handler(event):
+    """Handler para documentos enviados - sistema de fila"""
+    # Só processa documentos
+    if not event.document:
+        return
+    
+    chat_id = event.chat_id
+    
+    # Verifica se modo adição está ativo
+    if chat_id not in upload_tasks or not upload_tasks[chat_id]['active']:
+        return  # Ignora se modo não ativo
+    
+    # Extrai filename
+    filename = None
+    for attr in event.document.attributes:
+        if hasattr(attr, 'file_name'):
+            filename = attr.file_name
+            break
+    
+    if not filename:
+        filename = f"arquivo_{int(time.time())}.txt"
+    
+    # Verifica formato
+    if not filename.lower().endswith(('.txt', '.zip', '.rar')):
+        await event.reply(
+            "❌ **Formato não suportado!**\n"
+            "Use apenas: TXT, ZIP, RAR\n"
+            "📤 Continue enviando outros arquivos válidos"
+        )
+        return
+    
+    # Verifica tamanho
+    file_size = event.document.size
+    if file_size > 2 * 1024 * 1024 * 1024:  # 2GB
+        await event.reply(
+            "❌ **Arquivo muito grande!**\n"
+            f"📏 **Tamanho:** {file_size / 1024 / 1024:.1f} MB\n"
+            f"📐 **Limite:** 2GB\n"
+            "Divida em partes menores e continue enviando"
+        )
+        return
+    
+    # Adiciona à fila
+    file_info = (event, filename, file_size)
+    await processing_queue[chat_id].put(file_info)
+    
+    # Confirma adição à fila
+    queue_size = processing_queue[chat_id].qsize()
+    await event.reply(
+        f"📋 **Arquivo Adicionado à Fila!**\n\n"
+        f"📁 **Nome:** `{filename}`\n"
+        f"📏 **Tamanho:** {file_size / 1024 / 1024:.1f} MB\n"
+        f"🔢 **Posição na fila:** {queue_size}\n\n"
+        f"⚡ **Status:** Será processado automaticamente\n"
+        f"🔄 **Continue enviando** mais arquivos ou aguarde\n"
+        f"❌ **Para cancelar:** `/cancelarupload`"
+    )
+    
+    logger.info(f"Arquivo {filename} adicionado à fila do chat {chat_id}, posição {queue_size}")
+
+@bot.on(events.NewMessage(pattern=r'^/teste$'))
+async def teste_handler(event):
+    """Handler do comando /teste - para testar funcionamento"""
+    await event.reply(
+        "✅ **Bot funcionando perfeitamente!**\n\n"
+        "🔧 **Teste de funcionalidades:**\n"
+        "• Recebimento de mensagens: ✅\n"
+        "• Envio de respostas: ✅\n"
+        "• Processamento de comandos: ✅\n\n"
+        "📤 **Para testar upload:**\n"
+        "1. Digite `/adicionar`\n"
+        "2. Envie um arquivo TXT pequeno\n"
+        "3. Aguarde o processamento\n\n"
+        "Se ainda tiver problemas, use `/help`"
+    )
 
 @bot.on(events.NewMessage(pattern=r'^/help$'))
 async def help_handler(event):
@@ -701,7 +846,8 @@ async def help_handler(event):
 🤖 **Comandos disponíveis:**
 
 /start - Iniciar o bot
-/adicionar - Ativar modo de adição de arquivos
+/adicionar - Ativar modo de processamento em lote
+/cancelarupload - Cancelar uploads em andamento
 /help - Mostrar esta ajuda
 /stats - Estatísticas de uso
 
@@ -709,6 +855,12 @@ async def help_handler(event):
 • TXT - Arquivos de texto puro
 • ZIP - Compactados ZIP com TXTs internos
 • RAR - Compactados RAR com TXTs internos
+
+🚀 **Novo sistema de lote:**
+• Envie vários arquivos de uma vez
+• Download e processamento um por vez com progresso
+• Resultado final consolidado único
+• Cancelamento a qualquer momento
 
 🛡️ **Filtragem automática (igual ao painel):**
 • Remove divulgação, spam, nomes, propaganda
@@ -943,6 +1095,49 @@ Digite `/adicionar` e envie seus arquivos!
     """
     
     await event.reply(stats_text)
+
+@bot.on(events.NewMessage(pattern=r'^/cancelarupload$'))
+async def cancelar_upload_handler(event):
+    """Handler do comando /cancelarupload"""
+    chat_id = event.chat_id
+    user_id = event.sender_id
+    
+    logger.info(f"Comando /cancelarupload recebido de {user_id} no chat {chat_id}")
+    
+    if chat_id in upload_tasks and upload_tasks[chat_id]['active']:
+        # Cancela uploads ativos
+        upload_tasks[chat_id]['active'] = False
+        
+        # Limpa fila de processamento
+        if chat_id in processing_queue:
+            while not processing_queue[chat_id].empty():
+                try:
+                    processing_queue[chat_id].get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+        
+        await event.reply(
+            "🛑 **Upload Cancelado!**\n\n"
+            "❌ **Status:** Todos os uploads em andamento foram cancelados\n"
+            "🗑️ **Fila:** Limpa e pronta para novos arquivos\n"
+            "♻️ **Resultados:** Dados temporários descartados\n\n"
+            "✅ **Pronto para novos uploads!**\n"
+            "Digite `/adicionar` para recomeçar"
+        )
+        
+        # Limpa dados
+        if chat_id in upload_tasks:
+            del upload_tasks[chat_id]
+        if chat_id in processing_queue:
+            del processing_queue[chat_id]
+            
+        logger.info(f"Upload cancelado e dados limpos para chat {chat_id}")
+    else:
+        await event.reply(
+            "⚠️ **Nenhum upload ativo**\n\n"
+            "📝 **Status:** Não há uploads em andamento para cancelar\n"
+            "📤 **Para iniciar:** Digite `/adicionar` e envie seus arquivos"
+        )
 
 @bot.on(events.NewMessage(pattern=r'^/teste$'))
 async def teste_handler(event):
