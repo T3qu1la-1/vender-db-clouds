@@ -40,8 +40,9 @@ if not API_ID or not API_HASH or not BOT_TOKEN:
 
 try:
     api_id_int = int(API_ID)
+    admin_id_int = int(ADMIN_ID)
 except (ValueError, TypeError):
-    logger.error("❌ API_ID deve ser um número!")
+    logger.error("❌ API_ID e ADMIN_ID devem ser números!")
     exit(1)
 
 # Cliente Telethon
@@ -372,6 +373,7 @@ async def enviar_resultado_como_arquivo(chat_id, credenciais, tipo, stats):
 @bot.on(events.NewMessage(pattern=r'^/start$'))
 async def start_handler(event):
     """Handler do comando /start"""
+    logger.info(f"Comando /start recebido de {event.sender_id}")
     user = await event.get_sender()
     welcome_text = f"""🤖 **Bot Processador Gigante 4GB - Telethon**
 
@@ -401,6 +403,7 @@ Digite `/adicionar` para começar!"""
 @bot.on(events.NewMessage(pattern=r'^/adicionar$'))
 async def adicionar_handler(event):
     """Handler do comando /adicionar"""
+    logger.info(f"Comando /adicionar recebido de {event.sender_id}")
     await event.reply(
         "📤 **Modo Adição Ativado!**\n\n"
         "Agora envie seus arquivos:\n"
@@ -569,10 +572,10 @@ async def help_handler(event):
 @bot.on(events.NewMessage(pattern=r'^/ativarweb$'))
 async def ativar_web_handler(event):
     """Handler do comando /ativarweb - apenas admin"""
-    user_id = str(event.sender_id)
+    user_id = event.sender_id
     
     # Verifica se é admin
-    if user_id != str(ADMIN_ID):
+    if user_id != admin_id_int:
         await event.reply("❌ **Acesso negado!** Apenas o admin pode usar este comando.")
         return
     
@@ -602,10 +605,10 @@ async def ativar_web_handler(event):
 @bot.on(events.NewMessage(pattern=r'^/desativarweb$'))
 async def desativar_web_handler(event):
     """Handler do comando /desativarweb - apenas admin"""
-    user_id = str(event.sender_id)
+    user_id = event.sender_id
     
     # Verifica se é admin
-    if user_id != str(ADMIN_ID):
+    if user_id != admin_id_int:
         await event.reply("❌ **Acesso negado!** Apenas o admin pode usar este comando.")
         return
     
@@ -621,8 +624,8 @@ async def desativar_web_handler(event):
 @bot.on(events.NewMessage(pattern=r'^/status$'))
 async def status_handler(event):
     """Handler do comando /status"""
-    user_id = str(event.sender_id)
-    is_admin = (user_id == str(ADMIN_ID))
+    user_id = event.sender_id
+    is_admin = (user_id == admin_id_int)
     
     status_text = f"""
 📊 **Status do Sistema:**
@@ -658,8 +661,8 @@ async def status_handler(event):
 @bot.on(events.NewMessage(pattern=r'^/comandos$'))
 async def comandos_handler(event):
     """Handler do comando /comandos"""
-    user_id = str(event.sender_id)
-    is_admin = (user_id == str(ADMIN_ID))
+    user_id = event.sender_id
+    is_admin = (user_id == admin_id_int)
     
     comandos_text = """
 🤖 **Comandos Disponíveis:**
@@ -730,10 +733,10 @@ Sistema completo para processamento de credenciais com todas as funcionalidades 
 @bot.on(events.NewMessage(pattern=r'^/logs$'))
 async def logs_handler(event):
     """Handler do comando /logs - apenas admin"""
-    user_id = str(event.sender_id)
+    user_id = event.sender_id
     
     # Verifica se é admin
-    if user_id != str(ADMIN_ID):
+    if user_id != admin_id_int:
         await event.reply("❌ **Acesso negado!** Apenas o admin pode ver logs.")
         return
     
