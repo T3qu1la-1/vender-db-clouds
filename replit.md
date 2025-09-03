@@ -1,49 +1,74 @@
-# Flask TXT Processor Application
+
+# Flask TXT Processor Application - Sistema Gigante 4GB
 
 ## Overview
-This is a Flask web application designed for processing TXT files containing credential data in the format `url:user:pass`. The application provides an intuitive interface for uploading, processing, filtering, and downloading credential files.
+Sistema Flask otimizado para processamento de arquivos TXT/ZIP/RAR de até **4GB**, com arquitetura multi-SQLite distribuída por IP real.
+
+## Correções Implementadas (Set 2025)
+### ✅ **Erro 413 Request Entity Too Large - RESOLVIDO**
+- **Limite aumentado:** 2GB → **4GB** por arquivo
+- **Timeout estendido:** 30min → **2 horas (7200s)**
+- **Headers otimizados:** 32KB para requests grandes
+- **Workflow atualizado:** "Upload Gigante - 500MB+" configurado para 4GB
+- **Tratamento de erro:** Página explicativa para arquivos >4GB
+
+### 🚀 **Sistema de Processamento Multi-SQLite**
+- **8 SQLites por IP:** 4 principais + 4 shards distribuídos
+- **Streaming direto:** Arquivos 500MB+ processados sem RAM
+- **Auto-limpeza:** 20 minutos de inatividade
+- **URLs brasileiras:** Detecção automática expandida (.com/.net brasileiros)
+
+## Capacidades Atuais
+- ✅ **Upload:** Até 4GB por arquivo simultâneo
+- ✅ **Formatos:** TXT, ZIP, RAR
+- ✅ **Processamento:** Streaming direto para SQLite
+- ✅ **Filtros:** URLs brasileiras automáticas (.br + sites nacionais)
+- ✅ **Distribuição:** 4 shards para performance
+- ✅ **Timeout:** 2 horas para arquivos gigantes
 
 ## Project Structure
-- `app.py` - Main Flask application with all routes and processing logic
-- `main.py` - Entry point for running the application
-- `pyproject.toml` - Project dependencies and configuration
-- `app_backup.py` / `app_old.py` - Backup versions of the application
+- `app.py` - Aplicação Flask principal com sistema multi-SQLite
+- `main.py` - Entry point
+- `pyproject.toml` - Dependencies
+- `replit.md` - Documentação atualizada
 
 ## Features
-- Upload and process multiple TXT/ZIP/RAR files
-- In-memory processing without file storage
-- Brazilian URL filtering capabilities
-- SQLite database conversion
-- Modern dark-themed Bootstrap interface
-- Real-time statistics dashboard
+- **Upload de arquivos até 4GB** com tratamento de erro 413
+- **Processamento streaming** para arquivos 500MB+
+- **Sistema de sharding** com 4 SQLites distribuídos
+- **Detecção brasileira expandida** (inclui .com/.net nacionais)
+- **Interface dark moderna** com estatísticas por IP
+- **Auto-limpeza temporária** (20 min inatividade)
+
+## Workflows Configurados
+1. **"Upload Gigante - 500MB+"** (botão Run)
+   - Timeout: 7200s (2 horas)
+   - Limite: 4GB por arquivo
+   - Workers: 1 otimizado
+   - Headers: 32KB
 
 ## Dependencies
 - Flask 3.1.2+ - Web framework
-- Gunicorn 23.0.0+ - WSGI server
-- Email-validator 2.2.0+ - Input validation
-- Flask-SQLAlchemy 3.1.1+ - Database ORM
-- Psycopg2-binary 2.9.10+ - PostgreSQL adapter
+- Gunicorn 23.0.0+ - WSGI server otimizado
+- Email-validator 2.2.0+ - Validação
+- Flask-SQLAlchemy 3.1.1+ - ORM
+- Psycopg2-binary 2.9.10+ - PostgreSQL
 
-## Environment Setup
-- Configured for Replit environment with proxy middleware
-- Uses environment variables for session secrets
-- Database URL from environment (PostgreSQL available but app uses SQLite)
-- Runs on port 5000 with webview output
-
-## Recent Changes (September 2, 2025)
-- Restored main app.py from backup version
-- Configured Flask app with ProxyFix middleware for Replit
-- Set up proper workflow configuration for web preview
-- Installed all required dependencies via UV package manager
-- Configured deployment settings for autoscale deployment
+## Soluções para Arquivos >4GB
+1. **Divida em partes menores** (4GB máximo cada)
+2. **Comprima com ZIP/RAR** para reduzir tamanho
+3. **Use múltiplos uploads** simultâneos
+4. **Processe em lotes** separados
 
 ## User Preferences
-- Application is in Portuguese (PT-BR)
-- Dark theme interface with gradient styling
-- File processing focused on Brazilian credential filtering
+- Interface em Português (PT-BR)
+- Tema escuro com gradientes
+- Foco em credenciais brasileiras
+- Sistema temporário por IP
 
 ## Architecture
-- Single Flask application with embedded HTML templates
-- In-memory session data storage
-- Temporary SQLite database creation for conversion features
-- No persistent file storage - all processing is temporary
+- **Flask app** com ProxyFix para Replit
+- **8 SQLites por IP:** main, stats, brazilian, domains + 4 shards
+- **Streaming direto** para arquivos gigantes
+- **Detecção BR expandida** incluindo sites .com/.net brasileiros
+- **Auto-cleanup** após inatividade

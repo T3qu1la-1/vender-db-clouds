@@ -75,7 +75,7 @@ mode = "sequential"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "gunicorn --bind 0.0.0.0:5000 --reuse-port --reload --timeout 3600 --worker-connections 50 --max-requests 10 --max-requests-jitter 2 --worker-class sync --workers 1 --worker-tmp-dir /dev/shm --limit-request-field_size 16384 --limit-request-fields 50 --limit-request-line 8192 --graceful-timeout 600 app:app"
+args = "gunicorn --bind 0.0.0.0:5000 --reuse-port --reload --timeout 7200 --worker-connections 25 --max-requests 5 --max-requests-jitter 1 --worker-class sync --workers 1 --worker-tmp-dir /dev/shm --limit-request-field_size 32768 --limit-request-line 16384 --graceful-timeout 1200 --max-request-header-size 16384 --preload app:app"
 
 [[ports]]
 localPort = 5000
