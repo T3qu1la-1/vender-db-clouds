@@ -569,12 +569,15 @@ async def processar_fila_uploads(chat_id):
                 await processar_arquivo_individual(chat_id, file_info)
 
             except asyncio.TimeoutError:
-                # Timeout - verifica se deve finalizar
-                if chat_id in upload_tasks and upload_tasks[chat_id]['processed_count'] > 0:
-                    # Se tem arquivos processados e não vem mais, finaliza
-                    await asyncio.sleep(2)  # Aguarda mais 2s
-                    if processing_queue[chat_id].empty():
-                        break
+                # Timeout - verifica se deve finalizar (só se não tem arquivos processados)
+                if chat_id in upload_tasks and upload_tasks[chat_id]['processed_count'] == 0:
+                    # Se não processou nada ainda, continua aguardando
+                    continue
+                elif chat_id in upload_tasks and upload_tasks[chat_id]['processed_count'] > 0:
+                    # Se já processou algo, aguarda decisão do usuário via botões
+                    # Não finaliza automaticamente
+                    await asyncio.sleep(5)  # Aguarda mais tempo para o usuário decidir
+                    continue
                 continue
             except Exception as e:
                 logger.error(f"Erro no processador de fila {chat_id}: {e}")
@@ -669,7 +672,14 @@ async def processar_arquivo_individual(chat_id, file_info):
         total_time = time.time() - start_time
         speed_total = (len(file_content)/1024/1024) / total_time
 
-        # Resultado do arquivo individual - mais compacto
+        # Resultado do arquivo individual com botões de controle
+        buttons = [
+            [
+                Button.inline("🏁 Finalizar", f"finalizar_{chat_id}"),
+                Button.inline("➕ Adicionar mais", f"continuar_{chat_id}")
+            ]
+        ]
+
         await progress_msg.edit(
             f"✅ **Arquivo {current_file} - PROCESSADO!**\n\n"
             f"📁 `{filename}`\n"
@@ -679,7 +689,8 @@ async def processar_arquivo_individual(chat_id, file_info):
             f"✅ {stats['valid_lines']:,} | 🇧🇷 {stats['brazilian_lines']:,} | 🗑️ {stats['spam_removed']:,}\n\n"
             f"📈 **Total acumulado:**\n"
             f"✅ {len(upload_tasks[chat_id]['results']['credenciais']):,} | 🇧🇷 {len(upload_tasks[chat_id]['results']['brasileiras']):,}\n\n"
-            f"⚡ **Próximo arquivo ou finalizando...**"
+            f"⚡ **Escolha uma opção abaixo:**",
+            buttons=buttons
         )
 
         logger.info(f"Arquivo {current_file} processado: {filename} - {stats['valid_lines']} válidas - {speed_total:.1f} MB/s")
@@ -981,6 +992,55 @@ async def desativar_web_handler(event):
         "⚠️ **Nota:** O processo pode continuar em background\n"
         "Para reativar, use `/ativarweb`"
     )
+
+@bot.on(events.CallbackQuery)
+async def callback_handler(event):
+    """Handler para callbacks dos botões inline"""
+    try:
+        data = event.data.decode('utf-8')
+        chat_id = event.chat_id
+
+        if data.startswith('finalizar_'):
+            # Botão Finalizar pressionado
+            if chat_id in upload_tasks and upload_tasks[chat_id]['active']:
+                # Para o processamento e finaliza
+                upload_tasks[chat_id]['active'] = False
+                
+                # Limpa fila restante
+                if chat_id in processing_queue:
+                    while not processing_queue[chat_id].empty():
+                        try:
+                            processing_queue[chat_id].get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+
+                await event.edit(
+                    f"🏁 **Processamento Finalizado pelo Usuário!**\n\n"
+                    f"📊 **Resumo Final:**\n"
+                    f"✅ {len(upload_tasks[chat_id]['results']['credenciais']):,} credenciais\n"
+                    f"🇧🇷 {len(upload_tasks[chat_id]['results']['brasileiras']):,} brasileiras\n\n"
+                    f"📤 **Enviando resultados...**"
+                )
+
+                # Força finalização
+                await finalizar_processamento_lote(chat_id)
+            else:
+                await event.answer("❌ Nenhum upload ativo", alert=True)
+
+        elif data.startswith('continuar_'):
+            # Botão Adicionar mais pressionado
+            await event.edit(
+                f"➕ **Modo Adição Ativo!**\n\n"
+                f"📤 **Continue enviando seus arquivos**\n"
+                f"📊 **Já processados:** {upload_tasks[chat_id]['processed_count']} arquivos\n"
+                f"✅ **Total acumulado:** {len(upload_tasks[chat_id]['results']['credenciais']):,} credenciais\n\n"
+                f"🔄 **Aguardando próximos arquivos...**\n"
+                f"❌ `/cancelarupload` para cancelar"
+            )
+
+    except Exception as e:
+        logger.error(f"Erro no callback: {e}")
+        await event.answer("❌ Erro interno", alert=True)
 
 @bot.on(events.NewMessage(pattern=r'^/logs$'))
 async def logs_handler(event):
