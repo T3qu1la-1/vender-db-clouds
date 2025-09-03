@@ -568,7 +568,7 @@ async def enviar_resultado_como_arquivo(chat_id, credenciais, tipo, stats, user_
 
         logger.info(f"Enviando arquivo: {filename} com {len(credenciais)} credenciais")
 
-        # Envia como arquivo
+        # Envia como arquivo com timeout maior para arquivos grandes
         await bot.send_file(
             chat_id,
             io.BytesIO(content.encode('utf-8')),
@@ -576,7 +576,8 @@ async def enviar_resultado_como_arquivo(chat_id, credenciais, tipo, stats, user_
             caption=f"📁 **{filename}**\n\n"
                    f"✅ {len(credenciais):,} credenciais {tipo}\n"
                    f"📊 Taxa: {(stats['valid_lines']/max(1,stats['total_lines'])*100):.1f}%\n"
-                   f"👤 @{username} - Finalização #{finalization_number}"
+                   f"👤 @{username} - Finalização #{finalization_number}",
+            force_document=True
         )
 
         logger.info(f"Arquivo enviado com sucesso: {filename}")
@@ -926,7 +927,7 @@ async def finalizar_processamento_lote(chat_id, user_triggered=False):
             first_name = ""
             last_name = ""
 
-        # Atualiza histórico e obtém número da finalização
+        # Atualiza histórico e obtém número da finalização (apenas uma vez)
         finalization_number = update_user_history(
             user_id, username, first_name, last_name,
             files_processed, len(total_credenciais), len(total_brasileiras)
@@ -951,16 +952,19 @@ async def finalizar_processamento_lote(chat_id, user_triggered=False):
             f"📤 **Enviando resultados com naming bonito...**"
         )
 
-        # Envia arquivo consolidado geral (apenas 1 arquivo - sem duplicação)
+        # Envia arquivo consolidado geral 
         if total_credenciais:
             await enviar_resultado_como_arquivo(
                 chat_id, total_credenciais, "GERAL", stats_finais, user_info
             )
 
-        # Envia arquivo consolidado brasileiro (apenas 1 arquivo - sem duplicação)
-        if total_brasileiras:
+        # Envia arquivo consolidado brasileiro se existir
+        if total_brasileiras and len(total_brasileiras) > 0:
+            # Cria novo user_info para evitar duplicar numero de finalização
+            user_info_br = user_info.copy()
+            user_info_br['finalization_number'] = finalization_number  # Mantém o mesmo número
             await enviar_resultado_como_arquivo(
-                chat_id, total_brasileiras, "BRASILEIRAS", stats_finais, user_info
+                chat_id, total_brasileiras, "BRASILEIRAS", stats_finais, user_info_br
             )
 
         # Mensagem de conclusão
