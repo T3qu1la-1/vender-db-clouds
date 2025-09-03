@@ -815,10 +815,7 @@ async def processar_arquivo_individual(chat_id, file_info):
         # Download com chunks GIGANTES para velocidade máxima (2MB chunks)
         file_content = await event.download_media(
             bytes,
-            progress_callback=progress_callback,
-            file_size=file_size,
-            chunk_size=2097152,  # 2MB chunks para máxima velocidade
-            workers=4            # 4 workers paralelos
+            progress_callback=progress_callback
         )
 
         if not file_content:
