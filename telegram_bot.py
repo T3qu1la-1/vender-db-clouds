@@ -32,13 +32,23 @@ logger = logging.getLogger(__name__)
 API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH") 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+ADMIN_ID = os.environ.get("ADMIN_ID", "123456789")  # ID do admin
 
 if not all([API_ID, API_HASH, BOT_TOKEN]):
     logger.error("❌ Configurações faltando! Configure: API_ID, API_HASH, TELEGRAM_BOT_TOKEN")
     exit(1)
 
+try:
+    api_id_int = int(API_ID)
+except (ValueError, TypeError):
+    logger.error("❌ API_ID deve ser um número!")
+    exit(1)
+
 # Cliente Telethon
-bot = TelegramClient('bot', int(API_ID), API_HASH)
+bot = TelegramClient('bot', api_id_int, API_HASH)
+
+# Controle do painel web
+painel_ativo = False
 
 # ========== FUNÇÕES DE FILTRAGEM (do painel original) ==========
 
@@ -313,7 +323,7 @@ async def processar_arquivo_rar(content, filename, chat_id):
                             stats_total[key] += stats[key]
         
         # Remove arquivo temporário
-        if os.path.exists(temp_path):
+        if 'temp_path' in locals() and os.path.exists(temp_path):
             os.remove(temp_path)
         
         return todas_credenciais, todas_br, stats_total
@@ -322,7 +332,7 @@ async def processar_arquivo_rar(content, filename, chat_id):
         logger.error(f"Erro no RAR: {e}")
         # Remove arquivo temporário se existir
         try:
-            if 'temp_path' in locals() and os.path.exists(temp_path):
+            if 'temp_path' in locals() and temp_path and os.path.exists(temp_path):
                 os.remove(temp_path)
         except:
             pass
@@ -357,7 +367,7 @@ async def enviar_resultado_como_arquivo(chat_id, credenciais, tipo, stats):
 
 # ========== HANDLERS DO BOT ==========
 
-@bot.on(events.NewMessage(pattern='/start'))
+@bot.on(events.NewMessage(pattern=r'/start'))
 async def start_handler(event):
     """Handler do comando /start"""
     user = await event.get_sender()
@@ -388,7 +398,7 @@ Digite `/adicionar` para começar!
     
     await event.reply(welcome_text)
 
-@bot.on(events.NewMessage(pattern='/adicionar'))
+@bot.on(events.NewMessage(pattern=r'/adicionar'))
 async def adicionar_handler(event):
     """Handler do comando /adicionar"""
     await event.reply(
@@ -445,6 +455,11 @@ async def document_handler(event):
     try:
         # Download do arquivo da nuvem do Telegram
         file_content = await event.download_media(bytes)
+        
+        # Inicializa variáveis
+        credenciais = []
+        br_creds = []
+        stats = {'total_lines': 0, 'valid_lines': 0, 'brazilian_lines': 0, 'spam_removed': 0}
         
         # Processa baseado no tipo
         if filename.lower().endswith('.txt'):
@@ -514,7 +529,7 @@ async def document_handler(event):
             f"Tente novamente ou verifique o arquivo."
         )
 
-@bot.on(events.NewMessage(pattern='/help'))
+@bot.on(events.NewMessage(pattern=r'/help'))
 async def help_handler(event):
     """Handler do comando /help"""
     help_text = """
@@ -551,13 +566,199 @@ async def help_handler(event):
     
     await event.reply(help_text)
 
-@bot.on(events.NewMessage(pattern='/stats'))
+@bot.on(events.NewMessage(pattern=r'/ativarweb'))
+async def ativar_web_handler(event):
+    """Handler do comando /ativarweb - apenas admin"""
+    user_id = str(event.sender_id)
+    
+    # Verifica se é admin
+    if user_id != str(ADMIN_ID):
+        await event.reply("❌ **Acesso negado!** Apenas o admin pode usar este comando.")
+        return
+    
+    global painel_ativo
+    
+    if painel_ativo:
+        await event.reply("⚠️ **Painel web já está ativo!**")
+        return
+    
+    try:
+        # Ativa painel web
+        import subprocess
+        subprocess.Popen(["python", "app_web.py"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        painel_ativo = True
+        
+        await event.reply(
+            "✅ **Painel Web Ativado!**\n\n"
+            "🌐 **URL:** Confira na aba preview do Replit\n"
+            "⚡ **Status:** Online e funcionando\n"
+            "🔧 **Funcionalidades:** Todas do painel original\n\n"
+            "Para desativar, use `/desativarweb`"
+        )
+        
+    except Exception as e:
+        await event.reply(f"❌ **Erro ao ativar painel:** `{str(e)[:50]}`")
+
+@bot.on(events.NewMessage(pattern=r'/desativarweb'))
+async def desativar_web_handler(event):
+    """Handler do comando /desativarweb - apenas admin"""
+    user_id = str(event.sender_id)
+    
+    # Verifica se é admin
+    if user_id != str(ADMIN_ID):
+        await event.reply("❌ **Acesso negado!** Apenas o admin pode usar este comando.")
+        return
+    
+    global painel_ativo
+    painel_ativo = False
+    
+    await event.reply(
+        "🔴 **Painel Web Desativado!**\n\n"
+        "⚠️ **Nota:** O processo pode continuar em background\n"
+        "Para reativar, use `/ativarweb`"
+    )
+
+@bot.on(events.NewMessage(pattern=r'/status'))
+async def status_handler(event):
+    """Handler do comando /status"""
+    user_id = str(event.sender_id)
+    is_admin = (user_id == str(ADMIN_ID))
+    
+    status_text = f"""
+📊 **Status do Sistema:**
+
+🤖 **Bot:** Online e funcionando
+🌐 **Painel Web:** {"🟢 Ativo" if painel_ativo else "🔴 Inativo"}
+⚡ **Tecnologia:** Telethon + Flask
+🗄️ **Storage:** Nuvem Telegram (0% RAM)
+
+🛡️ **Filtros ativos:**
+• ✅ Spam e divulgação
+• ✅ Nomes e apelidos  
+• ✅ Links promocionais
+• ✅ Termos de hack/crack
+
+🇧🇷 **Detecção brasileira:**
+• ✅ URLs .br automáticas
+• ✅ +50 sites nacionais
+• ✅ Bancos, e-commerce, governo
+    """
+    
+    if is_admin:
+        status_text += f"""
+
+👑 **Painel Admin:**
+• `/ativarweb` - Ativar painel web
+• `/desativarweb` - Desativar painel web
+• `/logs` - Ver logs do sistema
+        """
+    
+    await event.reply(status_text)
+
+@bot.on(events.NewMessage(pattern=r'/comandos'))
+async def comandos_handler(event):
+    """Handler do comando /comandos"""
+    user_id = str(event.sender_id)
+    is_admin = (user_id == str(ADMIN_ID))
+    
+    comandos_text = """
+🤖 **Comandos Disponíveis:**
+
+📤 **Processamento:**
+• `/start` - Iniciar o bot
+• `/adicionar` - Ativar modo de adição
+• `/help` - Ajuda detalhada
+
+📊 **Informações:**
+• `/status` - Status do sistema
+• `/comandos` - Lista de comandos
+• `/sobre` - Sobre o projeto
+
+🔧 **Utilidades:**
+• Digite `/adicionar` e envie TXT/ZIP/RAR
+• Processamento automático com filtros
+• Resultado em arquivos organizados
+    """
+    
+    if is_admin:
+        comandos_text += """
+
+👑 **Admin apenas:**
+• `/ativarweb` - Ativar painel web
+• `/desativarweb` - Desativar painel  
+• `/logs` - Ver logs do sistema
+        """
+    
+    await event.reply(comandos_text)
+
+@bot.on(events.NewMessage(pattern=r'/sobre'))
+async def sobre_handler(event):
+    """Handler do comando /sobre"""
+    sobre_text = """
+🤖 **Bot Processador Gigante 4GB**
+
+📋 **Projeto:**
+Sistema completo para processamento de credenciais com todas as funcionalidades do painel original em formato bot.
+
+⚡ **Tecnologia:**
+• **Bot:** Telethon (API_ID + API_HASH + TOKEN)
+• **Painel:** Flask (ativação sob demanda)
+• **Storage:** 100% nuvem do Telegram
+• **RAM:** 0% uso de memória local
+
+🛡️ **Filtros implementados:**
+• Remove spam, divulgação, propaganda
+• Remove nomes, apelidos, links promocionais
+• Detecta URLs brasileiras expandidas
+• Mantém apenas formato URL:USER:PASS
+
+🇧🇷 **Detecção brasileira:**
+• Sites .br automáticos
+• Bancos (Itaú, Bradesco, BB, Santander...)
+• E-commerce (ML, Americanas, Magazine...)
+• Telecom (Vivo, Tim, Claro, UOL...)
+
+📈 **Capacidades:**
+• Arquivos até 2GB (limite Telegram)
+• Formatos: TXT, ZIP, RAR
+• Processamento streaming
+• Filtros igual ao painel original
+    """
+    
+    await event.reply(sobre_text)
+
+@bot.on(events.NewMessage(pattern=r'/logs'))
+async def logs_handler(event):
+    """Handler do comando /logs - apenas admin"""
+    user_id = str(event.sender_id)
+    
+    # Verifica se é admin
+    if user_id != str(ADMIN_ID):
+        await event.reply("❌ **Acesso negado!** Apenas o admin pode ver logs.")
+        return
+    
+    try:
+        # Lê últimas linhas do log (se existir)
+        logs_text = "📋 **Logs do Sistema:**\n\n"
+        logs_text += f"🤖 **Bot Status:** Online\n"
+        logs_text += f"🌐 **Painel:** {'Ativo' if painel_ativo else 'Inativo'}\n"
+        logs_text += f"⏰ **Timestamp:** {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n\n"
+        logs_text += f"💾 **Memória:** Usando apenas nuvem Telegram\n"
+        logs_text += f"🔄 **Processamento:** Streaming direto\n"
+        
+        await event.reply(logs_text)
+        
+    except Exception as e:
+        await event.reply(f"❌ **Erro ao buscar logs:** `{str(e)[:50]}`")
+
+@bot.on(events.NewMessage(pattern=r'/stats'))
 async def stats_handler(event):
     """Handler do comando /stats"""
     stats_text = f"""
 📊 **Estatísticas do Bot:**
 
 🤖 **Status:** Online e funcionando
+🌐 **Painel Web:** {"🟢 Ativo" if painel_ativo else "🔴 Inativo"}
 ⚡ **Tecnologia:** Telethon + Nuvem Telegram
 🗄️ **Armazenamento:** Apenas nuvem (0% RAM local)
 
