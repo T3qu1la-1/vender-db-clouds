@@ -34,7 +34,7 @@ API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 ADMIN_ID = os.environ.get("ADMIN_ID", "123456789")  # ID do admin
 
-if not all([API_ID, API_HASH, BOT_TOKEN]):
+if not API_ID or not API_HASH or not BOT_TOKEN:
     logger.error("❌ Configurações faltando! Configure: API_ID, API_HASH, TELEGRAM_BOT_TOKEN")
     exit(1)
 
@@ -323,7 +323,8 @@ async def processar_arquivo_rar(content, filename, chat_id):
                             stats_total[key] += stats[key]
         
         # Remove arquivo temporário
-        if 'temp_path' in locals() and os.path.exists(temp_path):
+        temp_path = locals().get('temp_path')
+        if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
         
         return todas_credenciais, todas_br, stats_total
@@ -332,8 +333,9 @@ async def processar_arquivo_rar(content, filename, chat_id):
         logger.error(f"Erro no RAR: {e}")
         # Remove arquivo temporário se existir
         try:
-            if 'temp_path' in locals() and temp_path and os.path.exists(temp_path):
-                os.remove(temp_path)
+            temp_path_local = locals().get('temp_path')
+            if temp_path_local and os.path.exists(temp_path_local):
+                os.remove(temp_path_local)
         except:
             pass
         return [], [], {'total_lines': 0, 'valid_lines': 0, 'brazilian_lines': 0, 'spam_removed': 0}
@@ -367,12 +369,11 @@ async def enviar_resultado_como_arquivo(chat_id, credenciais, tipo, stats):
 
 # ========== HANDLERS DO BOT ==========
 
-@bot.on(events.NewMessage(pattern=r'/start'))
+@bot.on(events.NewMessage(pattern=r'^/start$'))
 async def start_handler(event):
     """Handler do comando /start"""
     user = await event.get_sender()
-    welcome_text = f"""
-🤖 **Bot Processador Gigante 4GB - Telethon**
+    welcome_text = f"""🤖 **Bot Processador Gigante 4GB - Telethon**
 
 Olá {user.first_name}! 👋
 
@@ -393,12 +394,11 @@ Olá {user.first_name}! 👋
 • Mantém apenas formato URL:USER:PASS limpo
 • Filtragem igual ao painel original
 
-Digite `/adicionar` para começar!
-    """
+Digite `/adicionar` para começar!"""
     
     await event.reply(welcome_text)
 
-@bot.on(events.NewMessage(pattern=r'/adicionar'))
+@bot.on(events.NewMessage(pattern=r'^/adicionar$'))
 async def adicionar_handler(event):
     """Handler do comando /adicionar"""
     await event.reply(
@@ -414,7 +414,7 @@ async def adicionar_handler(event):
         "🔄 Envie quantos arquivos quiser!"
     )
 
-@bot.on(events.NewMessage)
+@bot.on(events.NewMessage(func=lambda e: e.document is not None))
 async def document_handler(event):
     """Handler para documentos enviados"""
     if not event.document:
@@ -529,7 +529,7 @@ async def document_handler(event):
             f"Tente novamente ou verifique o arquivo."
         )
 
-@bot.on(events.NewMessage(pattern=r'/help'))
+@bot.on(events.NewMessage(pattern=r'^/help$'))
 async def help_handler(event):
     """Handler do comando /help"""
     help_text = """
@@ -566,7 +566,7 @@ async def help_handler(event):
     
     await event.reply(help_text)
 
-@bot.on(events.NewMessage(pattern=r'/ativarweb'))
+@bot.on(events.NewMessage(pattern=r'^/ativarweb$'))
 async def ativar_web_handler(event):
     """Handler do comando /ativarweb - apenas admin"""
     user_id = str(event.sender_id)
@@ -599,7 +599,7 @@ async def ativar_web_handler(event):
     except Exception as e:
         await event.reply(f"❌ **Erro ao ativar painel:** `{str(e)[:50]}`")
 
-@bot.on(events.NewMessage(pattern=r'/desativarweb'))
+@bot.on(events.NewMessage(pattern=r'^/desativarweb$'))
 async def desativar_web_handler(event):
     """Handler do comando /desativarweb - apenas admin"""
     user_id = str(event.sender_id)
@@ -618,7 +618,7 @@ async def desativar_web_handler(event):
         "Para reativar, use `/ativarweb`"
     )
 
-@bot.on(events.NewMessage(pattern=r'/status'))
+@bot.on(events.NewMessage(pattern=r'^/status$'))
 async def status_handler(event):
     """Handler do comando /status"""
     user_id = str(event.sender_id)
@@ -655,7 +655,7 @@ async def status_handler(event):
     
     await event.reply(status_text)
 
-@bot.on(events.NewMessage(pattern=r'/comandos'))
+@bot.on(events.NewMessage(pattern=r'^/comandos$'))
 async def comandos_handler(event):
     """Handler do comando /comandos"""
     user_id = str(event.sender_id)
@@ -691,7 +691,7 @@ async def comandos_handler(event):
     
     await event.reply(comandos_text)
 
-@bot.on(events.NewMessage(pattern=r'/sobre'))
+@bot.on(events.NewMessage(pattern=r'^/sobre$'))
 async def sobre_handler(event):
     """Handler do comando /sobre"""
     sobre_text = """
@@ -727,7 +727,7 @@ Sistema completo para processamento de credenciais com todas as funcionalidades 
     
     await event.reply(sobre_text)
 
-@bot.on(events.NewMessage(pattern=r'/logs'))
+@bot.on(events.NewMessage(pattern=r'^/logs$'))
 async def logs_handler(event):
     """Handler do comando /logs - apenas admin"""
     user_id = str(event.sender_id)
@@ -751,7 +751,7 @@ async def logs_handler(event):
     except Exception as e:
         await event.reply(f"❌ **Erro ao buscar logs:** `{str(e)[:50]}`")
 
-@bot.on(events.NewMessage(pattern=r'/stats'))
+@bot.on(events.NewMessage(pattern=r'^/stats$'))
 async def stats_handler(event):
     """Handler do comando /stats"""
     stats_text = f"""
@@ -785,12 +785,22 @@ async def main():
     """Função principal do bot"""
     logger.info("🤖 Iniciando Bot Processador Gigante 4GB com Telethon...")
     
-    # Conecta ao Telegram
-    await bot.start(bot_token=BOT_TOKEN)
-    logger.info("✅ Bot conectado! Aguardando mensagens...")
-    
-    # Mantém o bot rodando
-    await bot.run_until_disconnected()
+    try:
+        # Conecta ao Telegram
+        if BOT_TOKEN:
+            await bot.start(bot_token=BOT_TOKEN)
+        else:
+            logger.error("❌ BOT_TOKEN não configurado!")
+            return
+            
+        logger.info("✅ Bot conectado! Aguardando mensagens...")
+        
+        # Mantém o bot rodando
+        await bot.run_until_disconnected()
+        
+    except Exception as e:
+        logger.error(f"❌ Erro no bot: {e}")
+        raise
 
 if __name__ == "__main__":
     bot.loop.run_until_complete(main())
