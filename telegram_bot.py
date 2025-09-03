@@ -110,18 +110,22 @@ def detectar_url_brasileira(url):
 def linha_valida(linha):
     """
     Valida se linha tem formato de credencial válido
-    IGUAL AO PAINEL ORIGINAL
+    CORRIGIDO - MENOS RESTRITIVO
     """
-    if not linha or len(linha) < 5:
+    if not linha or len(linha) < 3:
         return False
 
-    # Conta dois pontos na linha
+    # Aceita pelo menos 1 dois pontos (formato site:user ou user:pass)
     count_dois_pontos = linha.count(':')
-    if count_dois_pontos < 2:
+    if count_dois_pontos < 1:
         return False
 
-    # Verifica se não é só caracteres especiais
-    if re.match(r'^[^a-zA-Z0-9]*$', linha):
+    # Verifica se tem pelo menos alguns caracteres alfanuméricos
+    if not re.search(r'[a-zA-Z0-9]', linha):
+        return False
+
+    # Ignora linhas que são claramente comentários ou headers
+    if linha.startswith(('#', '//', '<!--', '==', '--')):
         return False
 
     return True
@@ -129,38 +133,24 @@ def linha_valida(linha):
 def filtrar_spam_divulgacao(linha):
     """
     Remove linhas de spam e divulgação, deixando só URL:USER:PASS
-    FILTROS IGUAIS AO PAINEL ORIGINAL
+    FILTROS CORRIGIDOS - MENOS RESTRITIVOS
     """
     linha_lower = linha.lower()
 
-    # Lista de termos de spam/divulgação para remover (DO PAINEL)
+    # Lista REDUZIDA de termos de spam - só os óbvios
     termos_spam = [
-        # Divulgação comum
-        'telegram.me', 'telegram.org', 't.me', '@', 'canal', 'grupo',
-        'divulga', 'vendas', 'contato', 'whatsapp', 'zap',
-
-        # Nomes/apelidos
-        'admin', 'moderador', 'vendedor', 'hacker', 'cracker',
-        'owner', 'dono', 'chefe', 'boss', 'master',
-
-        # Propaganda
-        'comprar', 'vender', 'barato', 'promo', 'desconto',
-        'gratis', 'free', 'premium', 'vip', 'exclusivo',
-
-        # Links promocionais
-        'bit.ly', 'tinyurl', 'encurtador', 'link',
-        'acesse', 'clique', 'download', 'baixar',
-
-        # Textos promocionais
-        'melhor', 'top', 'qualidade', 'confiavel', 'seguro',
-        'rapido', 'facil', 'simples', 'garantido',
-
-        # Termos de hack
-        'combo', 'list', 'lista', 'pack', 'pacote',
-        'fresh', 'novo', 'updated', 'atualizado'
+        # Só divulgação direta
+        'telegram.me/', 't.me/', '@canal', '@grupo',
+        'whatsapp:', 'zap:', 'contato:',
+        
+        # Só links promocionais óbvios
+        'bit.ly/', 'tinyurl.com/', 'encurtador.com',
+        
+        # Só textos claramente promocionais (linhas inteiras)
+        'compre agora', 'vendas aqui', 'clique aqui'
     ]
 
-    # Se contém termos de spam, remove a linha
+    # Verifica apenas termos muito específicos de spam
     for termo in termos_spam:
         if termo in linha_lower:
             return None
@@ -174,7 +164,7 @@ def filtrar_spam_divulgacao(linha):
 def processar_credencial(linha):
     """
     Processa uma linha de credencial e extrai dados
-    IGUAL AO PAINEL ORIGINAL
+    CORRIGIDO - ACEITA MAIS FORMATOS
     """
     linha_limpa = linha.strip()
 
@@ -195,20 +185,26 @@ def processar_credencial(linha):
                 password = partes[-1]
             else:
                 return None
-        # Formato: site.com:user:pass
+        # Formato: site.com:user:pass OU user:pass (sem URL)
         else:
             if len(partes) >= 3:
                 url = partes[0]
                 username = partes[1]
-                password = partes[2]
+                password = ':'.join(partes[2:])  # Senha pode ter : dentro
+            elif len(partes) == 2:
+                # Formato user:pass sem URL
+                url = "unknown"
+                username = partes[0]
+                password = partes[1]
             else:
                 return None
 
-        # Validações básicas
-        if not all([url, username, password]):
+        # Validações mais flexíveis
+        if not username or not password:
             return None
 
-        if len(username) < 2 or len(password) < 2:
+        # Aceita usernames e senhas menores
+        if len(username.strip()) < 1 or len(password.strip()) < 1:
             return None
 
         # Retorna dados estruturados
@@ -217,7 +213,7 @@ def processar_credencial(linha):
             'username': username.strip(),
             'password': password.strip(),
             'linha_completa': linha_filtrada,
-            'is_brazilian': detectar_url_brasileira(url)
+            'is_brazilian': detectar_url_brasileira(url) if url != "unknown" else False
         }
 
     except Exception:
@@ -270,6 +266,14 @@ async def processar_arquivo_texto(content, filename, chat_id):
                         stats['brazilian_lines'] += 1
                 else:
                     stats['spam_removed'] += 1
+                    
+                    # Debug: log exemplos de linhas rejeitadas (só as primeiras 5)
+                    if stats['spam_removed'] <= 5:
+                        logger.info(f"DEBUG - Linha rejeitada #{stats['spam_removed']}: {linha[:100]}")
+                        
+                    # Log a cada 10k linhas rejeitadas para debug
+                    if stats['spam_removed'] % 10000 == 0:
+                        logger.info(f"DEBUG - {stats['spam_removed']:,} linhas rejeitadas até agora")
 
             # Yield para não bloquear o event loop
             if i % (batch_size * 5) == 0:  # A cada 5000 linhas
