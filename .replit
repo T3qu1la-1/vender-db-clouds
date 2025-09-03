@@ -9,28 +9,7 @@ deploymentTarget = "autoscale"
 run = ["gunicorn", "--bind", "0.0.0.0:5000", "main:app"]
 
 [workflows]
-runButton = "Upload Gigante - 500MB+"
-
-[[workflows.workflow]]
-name = "Project"
-mode = "parallel"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Start application"
-
-[[workflows.workflow]]
-name = "Start application"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "gunicorn --bind 0.0.0.0:5000 --reuse-port --reload main:app"
-waitForPort = 5000
-
-[workflows.workflow.metadata]
-outputType = "webview"
+runButton = "Project"
 
 [[workflows.workflow]]
 name = "Start application - Extended"
@@ -76,6 +55,26 @@ mode = "sequential"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "gunicorn --bind 0.0.0.0:5000 --reuse-port --reload --timeout 7200 --worker-connections 25 --max-requests 5 --max-requests-jitter 1 --worker-class sync --workers 1 --worker-tmp-dir /dev/shm --limit-request-field_size 32768 --limit-request-line 16384 --graceful-timeout 1200 --max-request-header-size 16384 --preload app:app"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Bot Telegram"
+
+[[workflows.workflow]]
+name = "Bot Telegram"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python telegram_bot.py"
+
+[workflows.workflow.metadata]
+outputType = "console"
 
 [[ports]]
 localPort = 5000

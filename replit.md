@@ -1,8 +1,8 @@
 
-# Flask TXT Processor Application - Sistema Gigante 4GB
+# Bot Telegram - Sistema Gigante 4GB com Telethon
 
 ## Overview
-Sistema Flask otimizado para processamento de arquivos TXT/ZIP/RAR de até **4GB**, com arquitetura multi-SQLite distribuída por IP real.
+Bot do Telegram com **todas as funcionalidades do painel** usando Telethon, processamento de arquivos TXT/ZIP/RAR até **4GB** usando apenas a **nuvem do Telegram** (sem RAM/memória local).
 
 ## Correções Implementadas (Set 2025)
 ### ✅ **Erro 413 Request Entity Too Large - RESOLVIDO**
