@@ -9,6 +9,8 @@ import re
 import threading
 import time
 import hashlib
+import subprocess
+import sys
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
 
@@ -1024,6 +1026,12 @@ html_form = """
                         <h4 class="text-white">Configurações</h4>
                         <p class="text-muted">Gerenciamento de dados e SQLites</p>
                     </div>
+
+                    <div class="menu-item" onclick="startTelegramBot()">
+                        <div class="menu-icon"><i class="fas fa-paper-plane"></i></div>
+                        <h4 class="text-white">Bot Telegram</h4>
+                        <p class="text-muted">Iniciar bot do Telegram CloudBR</p>
+                    </div>
                 </div>
             </div>
 
@@ -1236,6 +1244,12 @@ html_form = """
         function showSystemInfo() {
             const infoElement = document.getElementById('systemInfo');
             infoElement.style.display = infoElement.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function startTelegramBot() {
+            if (confirm('🤖 Deseja iniciar o Bot do Telegram CloudBR?\n\nO bot será executado em segundo plano.')) {
+                window.location.href = '/start-telegram-bot';
+            }
         }
 
         document.querySelectorAll('input[type="file"]').forEach(input => {
@@ -2103,6 +2117,104 @@ cleanup_thread = threading.Thread(target=cleanup_inactive_ips, daemon=True)
 cleanup_thread.start()
 
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
+@app.route("/start-telegram-bot")
+def start_telegram_bot():
+    """Inicia o bot do Telegram"""
+    try:
+        # Inicia o bot em subprocess
+        subprocess.Popen([sys.executable, 'telegram_bot.py'], 
+                        stdout=subprocess.DEVNULL, 
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True)
+        
+        return """
+        <!doctype html>
+        <html lang="pt-BR" data-bs-theme="dark">
+        <head>
+            <meta charset="utf-8">
+            <title>🤖 Bot Telegram Iniciado</title>
+            <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+            <style>
+                body { background: linear-gradient(135deg, #4CAF50 0%, #2196F3 100%); min-height: 100vh; }
+                .card { backdrop-filter: blur(10px); background: rgba(255, 255, 255, 0.1); }
+            </style>
+        </head>
+        <body>
+            <div class="container py-5">
+                <div class="card">
+                    <div class="card-header text-center py-4" style="background: linear-gradient(45deg, #4CAF50 0%, #2196F3 100%);">
+                        <h1 class="text-white">🤖 Bot Telegram CloudBR</h1>
+                    </div>
+                    <div class="card-body text-center p-5">
+                        <div class="alert alert-success border-0" style="background: rgba(76, 175, 80, 0.2);">
+                            <h3>✅ Bot iniciado com sucesso!</h3>
+                            <p class="mb-0">O bot do Telegram está rodando em segundo plano</p>
+                        </div>
+                        
+                        <div class="alert alert-info border-0" style="background: rgba(33, 150, 243, 0.2);">
+                            <h4>📱 Como usar:</h4>
+                            <ol class="text-start">
+                                <li>Abra o Telegram</li>
+                                <li>Procure pelo bot ou acesse via link</li>
+                                <li>Digite <code>/adicionar</code> para começar</li>
+                                <li>Envie seus arquivos TXT/ZIP/RAR (até 4GB)</li>
+                                <li>Receba os resultados processados</li>
+                            </ol>
+                        </div>
+
+                        <div class="alert alert-warning border-0" style="background: rgba(255, 193, 7, 0.2);">
+                            <h5>⚡ Recursos do Bot:</h5>
+                            <ul class="text-start">
+                                <li>🇧🇷 Filtragem automática de URLs brasileiras</li>
+                                <li>📤 Resultados com nomes organizados</li>
+                                <li>🚀 Processamento até 4GB por arquivo</li>
+                                <li>📊 Estatísticas detalhadas</li>
+                                <li>💾 Histórico de processamentos</li>
+                            </ul>
+                        </div>
+                        
+                        <div class="d-grid gap-3 d-md-flex justify-content-md-center">
+                            <a href="/" class="btn btn-primary btn-lg">🏠 Voltar ao Painel</a>
+                            <button class="btn btn-success btn-lg" onclick="window.location.reload()">↻ Atualizar Status</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+    except Exception as e:
+        return f"""
+        <!doctype html>
+        <html lang="pt-BR" data-bs-theme="dark">
+        <head>
+            <meta charset="utf-8">
+            <title>❌ Erro ao Iniciar Bot</title>
+            <link href="https://cdn.replit.com/agent/bootstrap-agent-dark-theme.min.css" rel="stylesheet">
+            <style>body{{background: linear-gradient(135deg, #f44336 0%, #ff9800 100%); min-height: 100vh;}}</style>
+        </head>
+        <body>
+            <div class="container py-5">
+                <div class="card" style="backdrop-filter: blur(10px); background: rgba(255, 255, 255, 0.1);">
+                    <div class="card-header text-center py-4" style="background: linear-gradient(45deg, #f44336 0%, #ff9800 100%);">
+                        <h1 class="text-white">❌ Erro ao Iniciar Bot</h1>
+                    </div>
+                    <div class="card-body text-center p-4">
+                        <div class="alert alert-danger border-0" style="background: rgba(244, 67, 54, 0.2);">
+                            <h4>🚫 Falha na Inicialização</h4>
+                            <p>Erro: {str(e)[:200]}</p>
+                        </div>
+                        <div class="d-grid gap-2">
+                            <a href="/" class="btn btn-warning btn-lg">🔄 Voltar e Tentar Novamente</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        """, 500
 
 @app.errorhandler(413)
 def request_entity_too_large(error):
