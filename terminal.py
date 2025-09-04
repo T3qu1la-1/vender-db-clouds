@@ -254,14 +254,23 @@ def salvar_resultado(credenciais, nome_arquivo):
         return False
 
 def listar_arquivos():
-    """Lista arquivos TXT, ZIP e RAR na pasta atual"""
+    """Lista arquivos TXT, ZIP e RAR na pasta cloudsaqui"""
     arquivos = []
+    pasta_clouds = 'cloudsaqui'
     
-    for arquivo in os.listdir('.'):
+    # Cria a pasta se não existir
+    if not os.path.exists(pasta_clouds):
+        os.makedirs(pasta_clouds)
+        print(f"📁 Pasta {pasta_clouds} criada! Coloque seus arquivos lá.")
+        return []
+    
+    for arquivo in os.listdir(pasta_clouds):
         if arquivo.lower().endswith(('.txt', '.zip', '.rar')):
-            tamanho = os.path.getsize(arquivo)
+            caminho_completo = os.path.join(pasta_clouds, arquivo)
+            tamanho = os.path.getsize(caminho_completo)
             arquivos.append({
                 'nome': arquivo,
+                'caminho': caminho_completo,
                 'tamanho': tamanho,
                 'tamanho_mb': tamanho / (1024 * 1024)
             })
@@ -287,13 +296,13 @@ def mostrar_menu_principal():
 def mostrar_menu_processamento(arquivos):
     """Mostra menu de processamento de arquivos"""
     limpar_tela()
-    print("📁 ARQUIVOS ENCONTRADOS:")
+    print("📁 ARQUIVOS ENCONTRADOS NA PASTA CLOUDSAQUI:")
     print("=" * 70)
     
     if not arquivos:
-        print("❌ Nenhum arquivo TXT/ZIP/RAR encontrado na pasta atual!")
+        print("❌ Nenhum arquivo TXT/ZIP/RAR encontrado na pasta cloudsaqui!")
         print()
-        print("💡 Coloque seus arquivos na pasta e tente novamente.")
+        print("💡 Coloque seus arquivos na pasta 'cloudsaqui' e tente novamente.")
         return []
     
     for i, arquivo in enumerate(arquivos, 1):
@@ -309,6 +318,7 @@ def mostrar_menu_processamento(arquivos):
 def processar_arquivo_escolhido(arquivo):
     """Processa um arquivo específico"""
     nome = arquivo['nome']
+    caminho = arquivo['caminho']
     print(f"\n🚀 Processando: {nome}")
     print("=" * 50)
     
@@ -316,11 +326,11 @@ def processar_arquivo_escolhido(arquivo):
     
     # Determina tipo do arquivo e processa
     if nome.lower().endswith('.txt'):
-        credenciais, brasileiras, stats = processar_arquivo_txt(nome)
+        credenciais, brasileiras, stats = processar_arquivo_txt(caminho)
     elif nome.lower().endswith('.zip'):
-        credenciais, brasileiras, stats = processar_arquivo_zip(nome)
+        credenciais, brasileiras, stats = processar_arquivo_zip(caminho)
     elif nome.lower().endswith('.rar'):
-        credenciais, brasileiras, stats = processar_arquivo_rar(nome)
+        credenciais, brasileiras, stats = processar_arquivo_rar(caminho)
     else:
         print("❌ Formato de arquivo não suportado!")
         return
@@ -366,15 +376,16 @@ def processar_todos_arquivos(arquivos):
     
     for i, arquivo in enumerate(arquivos, 1):
         nome = arquivo['nome']
+        caminho = arquivo['caminho']
         print(f"\n📁 [{i}/{len(arquivos)}] Processando: {nome}")
         
         # Processa baseado na extensão
         if nome.lower().endswith('.txt'):
-            creds, brs, stats = processar_arquivo_txt(nome)
+            creds, brs, stats = processar_arquivo_txt(caminho)
         elif nome.lower().endswith('.zip'):
-            creds, brs, stats = processar_arquivo_zip(nome)
+            creds, brs, stats = processar_arquivo_zip(caminho)
         elif nome.lower().endswith('.rar'):
-            creds, brs, stats = processar_arquivo_rar(nome)
+            creds, brs, stats = processar_arquivo_rar(caminho)
         else:
             continue
         
@@ -432,10 +443,10 @@ def mostrar_ajuda():
     print("=" * 70)
     print()
     print("🎯 COMO USAR:")
-    print("1. Coloque seus arquivos TXT/ZIP/RAR na pasta do script")
+    print("1. Coloque seus arquivos TXT/ZIP/RAR na pasta 'cloudsaqui'")
     print("2. Execute o script: python terminal.py")
     print("3. Escolha uma opção do menu")
-    print("4. Os resultados serão salvos na mesma pasta")
+    print("4. Os resultados serão salvos na pasta principal")
     print()
     print("📁 FORMATOS SUPORTADOS:")
     print("• Arquivos TXT com credenciais (email:senha ou user:senha)")
@@ -535,14 +546,15 @@ def main():
                 # Ver arquivos
                 arquivos = listar_arquivos()
                 limpar_tela()
-                print("📁 ARQUIVOS NA PASTA ATUAL:")
+                print("📁 ARQUIVOS NA PASTA CLOUDSAQUI:")
                 print("=" * 70)
                 
                 if arquivos:
                     for arquivo in arquivos:
                         print(f"📄 {arquivo['nome']} - {arquivo['tamanho_mb']:.1f} MB")
                 else:
-                    print("❌ Nenhum arquivo TXT/ZIP/RAR encontrado!")
+                    print("❌ Nenhum arquivo TXT/ZIP/RAR encontrado na pasta cloudsaqui!")
+                    print("💡 Coloque seus arquivos na pasta 'cloudsaqui' e tente novamente.")
                 
                 aguardar_enter()
             

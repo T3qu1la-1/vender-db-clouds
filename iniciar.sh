@@ -113,7 +113,7 @@ case $opcao in
         echo "    • Resultado enviado como arquivos"
         echo ""
         echo "📁 COMO USAR:"
-        echo "1. Coloque arquivos TXT/ZIP/RAR na pasta"
+        echo "1. Coloque arquivos TXT/ZIP/RAR na pasta 'cloudsaqui'"
         echo "2. Execute: ./iniciar.sh"
         echo "3. Escolha a versão desejada"
         echo "4. Siga as instruções na tela"
