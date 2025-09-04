@@ -254,26 +254,45 @@ def salvar_resultado(credenciais, nome_arquivo):
         return False
 
 def listar_arquivos():
-    """Lista arquivos TXT, ZIP e RAR na pasta cloudsaqui"""
+    """Lista arquivos TXT, ZIP e RAR na pasta atual"""
     arquivos = []
-    pasta_clouds = 'cloudsaqui'
+    pasta_atual = '.'
     
-    # Cria a pasta se não existir
-    if not os.path.exists(pasta_clouds):
-        os.makedirs(pasta_clouds)
-        print(f"📁 Pasta {pasta_clouds} criada! Coloque seus arquivos lá.")
-        return []
-    
-    for arquivo in os.listdir(pasta_clouds):
+    # Lista arquivos na pasta atual
+    for arquivo in os.listdir(pasta_atual):
         if arquivo.lower().endswith(('.txt', '.zip', '.rar')):
-            caminho_completo = os.path.join(pasta_clouds, arquivo)
-            tamanho = os.path.getsize(caminho_completo)
-            arquivos.append({
-                'nome': arquivo,
-                'caminho': caminho_completo,
-                'tamanho': tamanho,
-                'tamanho_mb': tamanho / (1024 * 1024)
-            })
+            caminho_completo = os.path.join(pasta_atual, arquivo)
+            # Pula se for o próprio script ou arquivos do sistema
+            if arquivo in ['terminal.py', 'app_web.py', 'telegram_bot.py', 'iniciar.sh']:
+                continue
+            
+            try:
+                tamanho = os.path.getsize(caminho_completo)
+                arquivos.append({
+                    'nome': arquivo,
+                    'caminho': caminho_completo,
+                    'tamanho': tamanho,
+                    'tamanho_mb': tamanho / (1024 * 1024)
+                })
+            except OSError:
+                continue
+    
+    # Também procura na pasta cloudsaqui se existir
+    pasta_clouds = 'cloudsaqui'
+    if os.path.exists(pasta_clouds):
+        for arquivo in os.listdir(pasta_clouds):
+            if arquivo.lower().endswith(('.txt', '.zip', '.rar')):
+                caminho_completo = os.path.join(pasta_clouds, arquivo)
+                try:
+                    tamanho = os.path.getsize(caminho_completo)
+                    arquivos.append({
+                        'nome': f"cloudsaqui/{arquivo}",
+                        'caminho': caminho_completo,
+                        'tamanho': tamanho,
+                        'tamanho_mb': tamanho / (1024 * 1024)
+                    })
+                except OSError:
+                    continue
     
     return sorted(arquivos, key=lambda x: x['nome'])
 
@@ -296,13 +315,13 @@ def mostrar_menu_principal():
 def mostrar_menu_processamento(arquivos):
     """Mostra menu de processamento de arquivos"""
     limpar_tela()
-    print("📁 ARQUIVOS ENCONTRADOS NA PASTA CLOUDSAQUI:")
+    print("📁 ARQUIVOS ENCONTRADOS NA PASTA ATUAL:")
     print("=" * 70)
     
     if not arquivos:
-        print("❌ Nenhum arquivo TXT/ZIP/RAR encontrado na pasta cloudsaqui!")
+        print("❌ Nenhum arquivo TXT/ZIP/RAR encontrado!")
         print()
-        print("💡 Coloque seus arquivos na pasta 'cloudsaqui' e tente novamente.")
+        print("💡 Coloque seus arquivos TXT/ZIP/RAR nesta pasta e tente novamente.")
         return []
     
     for i, arquivo in enumerate(arquivos, 1):
@@ -546,15 +565,15 @@ def main():
                 # Ver arquivos
                 arquivos = listar_arquivos()
                 limpar_tela()
-                print("📁 ARQUIVOS NA PASTA CLOUDSAQUI:")
+                print("📁 ARQUIVOS DISPONÍVEIS:")
                 print("=" * 70)
                 
                 if arquivos:
                     for arquivo in arquivos:
                         print(f"📄 {arquivo['nome']} - {arquivo['tamanho_mb']:.1f} MB")
                 else:
-                    print("❌ Nenhum arquivo TXT/ZIP/RAR encontrado na pasta cloudsaqui!")
-                    print("💡 Coloque seus arquivos na pasta 'cloudsaqui' e tente novamente.")
+                    print("❌ Nenhum arquivo TXT/ZIP/RAR encontrado!")
+                    print("💡 Coloque seus arquivos TXT/ZIP/RAR nesta pasta e tente novamente.")
                 
                 aguardar_enter()
             
