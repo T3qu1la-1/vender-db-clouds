@@ -80,48 +80,62 @@ def is_brazilian_url(url):
         if site in url_lower:
             return True
     
+    # Verifica padrões adicionais brasileiros
+    brazilian_patterns = [
+        r'\.com\.br', r'\.org\.br', r'\.net\.br', r'\.gov\.br',
+        r'\.edu\.br', r'\.mil\.br', r'\.br(?:\W|$)',
+        r'bradesco', r'itau', r'santander', r'caixa',
+        r'uol\.', r'globo\.', r'terra\.', r'ig\.'
+    ]
+    
+    for pattern in brazilian_patterns:
+        if re.search(pattern, url_lower):
+            return True
+    
     return False
 
 def validar_credencial(linha):
     """Valida se uma linha contém credencial no formato email:senha ou user:senha"""
     linha = linha.strip()
     
-    # Remove linhas muito curtas ou muito longas
-    if len(linha) < 5 or len(linha) > 500:
+    # Remove linhas muito curtas ou muito longas (mais flexível)
+    if len(linha) < 3 or len(linha) > 1000:
         return False
     
-    # Remove spam comum
+    # Remove apenas spam muito óbvio
     spam_patterns = [
-        r'\*{10,}', r'={10,}', r'-{10,}', r'_{10,}',
-        r'WOLF', r'CRACKED', r'HACKED', r'FREE',
-        r'TELEGRAM', r'DISCORD', r'@', r'#',
-        r'https?://', r'www\.', r'\.exe', r'\.zip'
+        r'\*{20,}', r'={20,}', r'-{20,}', r'_{20,}',  # Só linhas com muitos símbolos
+        r'^WOLF', r'^CRACKED', r'^HACKED', r'^FREE',  # Só no início da linha
+        r'telegram\.me', r't\.me/', r'discord\.gg'     # Links de divulgação específicos
     ]
     
     for pattern in spam_patterns:
         if re.search(pattern, linha, re.IGNORECASE):
             return False
     
-    # Verifica formato email:senha ou user:senha
+    # Verifica formato com pelo menos 1 dois pontos
     if ':' not in linha:
         return False
     
     partes = linha.split(':')
-    if len(partes) != 2:
+    if len(partes) < 2:
         return False
     
-    usuario, senha = partes
-    
-    # Valida usuário (email ou username)
-    if len(usuario) < 3 or len(senha) < 3:
+    # Aceita formatos: user:pass, email:pass, url:user:pass
+    if len(partes) == 2:
+        usuario, senha = partes
+    elif len(partes) >= 3:
+        # Formato url:user:pass ou user:pass:extra
+        usuario = partes[1] if partes[0].lower().startswith(('http', 'https', 'www', 'ftp')) else partes[0]
+        senha = partes[2] if partes[0].lower().startswith(('http', 'https', 'www', 'ftp')) else partes[1]
+    else:
         return False
     
-    # Se contém @, valida como email
-    if '@' in usuario:
-        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-        if not re.match(email_pattern, usuario):
-            return False
+    # Validação mais flexível
+    if len(usuario.strip()) < 1 or len(senha.strip()) < 1:
+        return False
     
+    # Remove validação rigorosa de email - aceita qualquer formato com @
     return True
 
 def processar_arquivo_txt(arquivo_path):
@@ -129,6 +143,7 @@ def processar_arquivo_txt(arquivo_path):
     credenciais = []
     brasileiras = []
     stats = {'total_lines': 0, 'valid_lines': 0, 'brazilian_lines': 0, 'spam_removed': 0}
+    exemplos_rejeitados = []
     
     try:
         with open(arquivo_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -136,6 +151,9 @@ def processar_arquivo_txt(arquivo_path):
                 stats['total_lines'] += 1
                 linha = linha.strip()
                 
+                if not linha:  # Pula linhas vazias
+                    continue
+                    
                 if validar_credencial(linha):
                     credenciais.append(linha)
                     stats['valid_lines'] += 1
@@ -146,6 +164,15 @@ def processar_arquivo_txt(arquivo_path):
                         stats['brazilian_lines'] += 1
                 else:
                     stats['spam_removed'] += 1
+                    # Coleta exemplos de linhas rejeitadas (primeiras 5)
+                    if len(exemplos_rejeitados) < 5:
+                        exemplos_rejeitados.append(linha[:100])
+        
+        # Mostra exemplos de linhas rejeitadas para debug
+        if exemplos_rejeitados:
+            print(f"  🔍 Exemplos de linhas rejeitadas:")
+            for i, exemplo in enumerate(exemplos_rejeitados, 1):
+                print(f"    {i}. {exemplo}")
     
     except Exception as e:
         print(f"❌ Erro ao processar {arquivo_path}: {e}")
